@@ -11,6 +11,8 @@ export interface AgendaItem {
   topic: string;
   description: string;
   speakerIds: string[];
+  keyPoints?: string[];
+  expectedOutcome?: string;
 }
 
 export interface MeetingAgenda {

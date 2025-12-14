@@ -32,7 +32,13 @@ const agendaSchema: Schema = {
           durationMinutes: { type: Type.NUMBER, description: "Duration of this topic in minutes" },
           topic: { type: Type.STRING, description: "Main topic header" },
           description: { type: Type.STRING, description: "Details about what will be discussed" },
-          suggestedSpeakerName: { type: Type.STRING, description: "Name of the stakeholder who should speak" }
+          suggestedSpeakerName: { type: Type.STRING, description: "Name of the stakeholder who should speak" },
+          keyPoints: { 
+             type: Type.ARRAY, 
+             items: { type: Type.STRING }, 
+             description: "List of 2-3 specific points to discuss or questions to answer" 
+          },
+          expectedOutcome: { type: Type.STRING, description: "The specific goal, decision, or deliverable expected from this item" }
         },
         required: ["topic", "durationMinutes", "description"]
       }
@@ -59,7 +65,7 @@ export const generateAgendaFromFile = async (fileBase64: string, mimeType: strin
             }
           },
           {
-            text: "Analyze this document and generate a structured meeting agenda. Identify key stakeholders (with roles), topics to discuss, and estimate time for each based on the content complexity. If the document is not about a meeting, create a review meeting agenda for it."
+            text: "Analyze this document and generate a structured meeting agenda. Identify key stakeholders (with roles), topics to discuss, and estimate time for each based on the content complexity. Include key discussion points and expected outcomes for each topic. If the document is not about a meeting, create a review meeting agenda for it."
           }
         ]
       },
@@ -91,7 +97,9 @@ export const generateAgendaFromFile = async (fileBase64: string, mimeType: strin
           topic: item.topic,
           description: item.description,
           durationMinutes: item.durationMinutes,
-          speakerIds: matchedStakeholder ? [matchedStakeholder.id] : []
+          speakerIds: matchedStakeholder ? [matchedStakeholder.id] : [],
+          keyPoints: item.keyPoints || [],
+          expectedOutcome: item.expectedOutcome || ''
         };
       });
 

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { MeetingAgenda, AgendaItem, Stakeholder } from '../types';
 import { 
   Clock, Users, Calendar, User, GripVertical, Plus, Trash2, Edit2, Check, X, Mail, 
-  Share2, Download, Link as LinkIcon, FileText as FileTextIcon, ChevronDown, Calendar as CalendarIcon
+  Share2, Download, Link as LinkIcon, FileText as FileTextIcon, ChevronDown, Calendar as CalendarIcon,
+  List, Target
 } from 'lucide-react';
 import {
   DndContext, 
@@ -185,18 +186,38 @@ const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stak
               onChange={e => setEditData({...editData, description: e.target.value})}
               placeholder="Description"
             />
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label className="text-xs font-semibold text-slate-400 uppercase">Duration (min)</label>
-                <input 
-                  type="number"
-                  min="1"
-                  className="w-full text-sm border-b border-slate-200 focus:outline-none focus:border-indigo-500 py-1"
-                  value={editData.durationMinutes}
-                  onChange={e => setEditData({...editData, durationMinutes: parseInt(e.target.value) || 0})}
-                />
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                 <label className="text-xs font-semibold text-slate-400 uppercase block mb-1">Key Discussion Points (one per line)</label>
+                 <textarea
+                   className="w-full text-sm text-slate-600 border border-slate-200 rounded p-2 focus:outline-none focus:border-indigo-500 min-h-[80px]"
+                   value={editData.keyPoints?.join('\n') || ''}
+                   onChange={e => setEditData({...editData, keyPoints: e.target.value.split('\n')})}
+                   placeholder="• Review Q1 metrics&#10;• Discuss blocking issues"
+                 />
+              </div>
+              <div>
+                 <label className="text-xs font-semibold text-slate-400 uppercase block mb-1">Expected Outcome</label>
+                 <input
+                   className="w-full text-sm text-slate-600 border-b border-slate-200 focus:outline-none focus:border-indigo-500 py-1"
+                   value={editData.expectedOutcome || ''}
+                   onChange={e => setEditData({...editData, expectedOutcome: e.target.value})}
+                   placeholder="e.g., Approval of budget"
+                 />
+                 <div className="mt-4">
+                    <label className="text-xs font-semibold text-slate-400 uppercase">Duration (min)</label>
+                    <input 
+                      type="number"
+                      min="1"
+                      className="w-full text-sm border-b border-slate-200 focus:outline-none focus:border-indigo-500 py-1"
+                      value={editData.durationMinutes}
+                      onChange={e => setEditData({...editData, durationMinutes: parseInt(e.target.value) || 0})}
+                    />
+                 </div>
               </div>
             </div>
+
             <div>
               <label className="text-xs font-semibold text-slate-400 uppercase block mb-2">Assign Stakeholders</label>
               <div className="flex flex-wrap gap-2">
@@ -246,8 +267,30 @@ const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stak
                 {item.description}
               </p>
               
+              {item.keyPoints && item.keyPoints.length > 0 && (
+                <div className="mt-3 mb-3">
+                  <h4 className="text-xs font-semibold text-slate-500 uppercase mb-1 flex items-center gap-1">
+                    <List size={12} /> Key Points
+                  </h4>
+                  <ul className="list-disc list-inside text-sm text-slate-600 space-y-0.5 ml-1">
+                    {item.keyPoints.map((point, idx) => (
+                      point.trim() && <li key={idx}>{point}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {item.expectedOutcome && (
+                <div className="mt-3 bg-green-50/50 p-2 rounded-lg border border-green-100 inline-block w-full">
+                  <h4 className="text-xs font-semibold text-green-700 uppercase mb-1 flex items-center gap-1">
+                    <Target size={12} /> Expected Outcome
+                  </h4>
+                  <p className="text-sm text-green-800">{item.expectedOutcome}</p>
+                </div>
+              )}
+              
               {item.speakerIds && item.speakerIds.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
+                <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-slate-50">
                   {item.speakerIds.map(id => {
                     const speaker = stakeholders.find(s => s.id === id);
                     if (!speaker) return null;
@@ -394,20 +437,29 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ agenda, isLoading, o
             .filter(Boolean)
             .join(', ');
             
-        return [start + ' - ' + end, item.topic, item.durationMinutes + 'm', speakers];
+        // Construct detailed topic description
+        let details = item.topic + "\n\n" + item.description;
+        if (item.keyPoints && item.keyPoints.length > 0) {
+            details += "\n\nKey Points:\n• " + item.keyPoints.join("\n• ");
+        }
+        if (item.expectedOutcome) {
+            details += "\n\nOutcome: " + item.expectedOutcome;
+        }
+
+        return [start + ' - ' + end, details, item.durationMinutes + 'm', speakers];
     });
 
     autoTable(doc, {
         startY: finalY + 4,
-        head: [['Time', 'Topic', 'Duration', 'Speakers']],
+        head: [['Time', 'Details', 'Dur', 'Speakers']],
         body: itemRows,
         theme: 'grid',
         headStyles: { fillColor: [15, 23, 42] },
         columnStyles: {
-            0: { cellWidth: 30 },
+            0: { cellWidth: 25 },
             1: { cellWidth: 'auto' },
-            2: { cellWidth: 20 },
-            3: { cellWidth: 40 }
+            2: { cellWidth: 15 },
+            3: { cellWidth: 35 }
         }
     });
 
@@ -421,7 +473,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ agenda, isLoading, o
     let icsContent = 
 `BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//AgendaGenius//EN
+PRODID:-//Agenda//EN
 CALSCALE:GREGORIAN
 METHOD:PUBLISH
 `;
@@ -439,7 +491,7 @@ METHOD:PUBLISH
 
     icsContent += 
 `BEGIN:VEVENT
-UID:${Date.now()}@agendagenius.app
+UID:${Date.now()}@agenda.app
 DTSTAMP:${formatDate(new Date())}
 DTSTART:${formatDate(startDate)}
 DTEND:${formatDate(endDate)}
@@ -471,7 +523,14 @@ END:VCALENDAR`;
         const date = new Date(); date.setHours(h, m + item.durationMinutes);
         currentTime = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         
-        body += `[${start} - ${currentTime}] ${item.topic} (${item.durationMinutes}m)\n${item.description}\n\n`;
+        body += `[${start} - ${currentTime}] ${item.topic} (${item.durationMinutes}m)\n${item.description}\n`;
+        if (item.keyPoints && item.keyPoints.length > 0) {
+           body += `Key Points:\n${item.keyPoints.map(p => '• ' + p).join('\n')}\n`;
+        }
+        if (item.expectedOutcome) {
+           body += `Outcome: ${item.expectedOutcome}\n`;
+        }
+        body += `\n`;
     });
     
     window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(body)}`;

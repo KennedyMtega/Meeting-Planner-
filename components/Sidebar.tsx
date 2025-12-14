@@ -31,9 +31,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ files, onFileUpload, onRemoveF
           <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white">
             <FileText size={18} />
           </div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">AgendaGenius</h1>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Agenda</h1>
         </div>
-        <p className="text-xs text-slate-500 ml-10">AI-Powered Meeting Planner</p>
+        <p className="text-xs text-slate-500 ml-10">Meeting Breakdown Planner</p>
       </div>
 
       <div className="p-6 flex-1 overflow-y-auto">
