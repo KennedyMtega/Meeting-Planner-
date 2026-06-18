@@ -3,7 +3,7 @@ import { MeetingAgenda, AgendaItem, Stakeholder } from '../types';
 import { 
   Clock, Users, Calendar, User, GripVertical, Plus, Trash2, Edit2, Check, X, Mail, 
   Share2, Download, Link as LinkIcon, FileText as FileTextIcon, ChevronDown, Calendar as CalendarIcon,
-  List, Target
+  List, Target, Search
 } from 'lucide-react';
 import {
   DndContext, 
@@ -121,9 +121,10 @@ interface SortableItemProps {
   stakeholders: Stakeholder[];
   onUpdate: (item: AgendaItem) => void;
   onRemove: (id: string) => void;
+  isDragDisabled?: boolean;
 }
 
-const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stakeholders, onUpdate, onRemove }) => {
+const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stakeholders, onUpdate, onRemove, isDragDisabled }) => {
   const {
     attributes,
     listeners,
@@ -131,7 +132,10 @@ const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stak
     transform,
     transition,
     isDragging
-  } = useSortable({ id: item.id });
+  } = useSortable({ 
+    id: item.id,
+    disabled: isDragDisabled
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -247,7 +251,7 @@ const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stak
             <div 
               {...attributes} 
               {...listeners} 
-              className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 flex flex-col justify-center"
+              className={`text-slate-300 flex flex-col justify-center ${isDragDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-grab active:cursor-grabbing hover:text-slate-500'}`}
             >
               <GripVertical size={20} />
             </div>
@@ -316,6 +320,7 @@ const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stak
 export const TimelineView: React.FC<TimelineViewProps> = ({ agenda, isLoading, onUpdateAgenda }) => {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [meetingDate, setMeetingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -570,9 +575,27 @@ END:VCALENDAR`;
     );
   }
 
-  // Calculate accumulated time for display
-  let currentTime = agenda.startTime;
+  // Pre-calculate times for all items before filtering so timestamps remain accurate
+  let tempTime = agenda.startTime;
+  const itemsWithTimes = agenda.items.map(item => {
+      const startTime = tempTime;
+      tempTime = addMinutes(tempTime, item.durationMinutes);
+      return { ...item, startTimeCalculated: startTime };
+  });
+
   const totalDuration = agenda.items.reduce((acc, item) => acc + item.durationMinutes, 0);
+
+  // Filter items based on search
+  const isSearching = searchQuery.trim().length > 0;
+  const filteredItems = isSearching 
+    ? itemsWithTimes.filter(item => {
+        const q = searchQuery.toLowerCase();
+        return item.topic.toLowerCase().includes(q) || 
+               item.description.toLowerCase().includes(q) ||
+               item.keyPoints?.some(k => k.toLowerCase().includes(q)) ||
+               item.expectedOutcome?.toLowerCase().includes(q);
+      })
+    : itemsWithTimes;
 
   return (
     <div className="flex-1 h-full overflow-y-auto bg-slate-50/30">
@@ -580,40 +603,59 @@ END:VCALENDAR`;
         {/* Header Section */}
         <div className="flex flex-col xl:flex-row gap-8 mb-12">
            <div className="flex-1">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-4">
                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 text-white text-xs font-semibold rounded-full shadow-md shadow-slate-900/20">
                    <Clock size={12} />
                    {totalDuration} Minutes Total
                  </div>
                  
-                 {/* Export Dropdown */}
-                 <div className="relative">
-                    <button 
-                       onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                       className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
-                    >
-                       <Share2 size={16} />
-                       Share / Export
-                       <ChevronDown size={14} className={`transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    
-                    {isExportMenuOpen && (
-                       <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
-                          <button onClick={handleExportPDF} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
-                             <FileTextIcon size={16} className="text-red-500" /> Export as PDF
-                          </button>
-                          <button onClick={handleExportiCal} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
-                             <CalendarIcon size={16} className="text-blue-500" /> Export as iCal
-                          </button>
-                          <div className="h-px bg-slate-100 my-1"></div>
-                          <button onClick={handleShareEmail} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
-                             <Mail size={16} className="text-slate-500" /> Share via Email
-                          </button>
-                          <button onClick={handleCopyLink} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
-                             <LinkIcon size={16} className="text-slate-500" /> Copy Details
-                          </button>
-                       </div>
-                    )}
+                 <div className="flex items-center gap-2">
+                     {/* Search Bar */}
+                     <div className="relative group">
+                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
+                         <input 
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Filter topics..."
+                            className="w-48 focus:w-64 transition-all pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-500 shadow-sm"
+                         />
+                         {searchQuery && (
+                            <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
+                                <X size={12} />
+                            </button>
+                         )}
+                     </div>
+
+                     {/* Export Dropdown */}
+                     <div className="relative">
+                        <button 
+                           onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                           className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
+                        >
+                           <Share2 size={16} />
+                           Share
+                           <ChevronDown size={14} className={`transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        
+                        {isExportMenuOpen && (
+                           <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+                              <button onClick={handleExportPDF} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
+                                 <FileTextIcon size={16} className="text-red-500" /> Export as PDF
+                              </button>
+                              <button onClick={handleExportiCal} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
+                                 <CalendarIcon size={16} className="text-blue-500" /> Export as iCal
+                              </button>
+                              <div className="h-px bg-slate-100 my-1"></div>
+                              <button onClick={handleShareEmail} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
+                                 <Mail size={16} className="text-slate-500" /> Share via Email
+                              </button>
+                              <button onClick={handleCopyLink} className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3">
+                                 <LinkIcon size={16} className="text-slate-500" /> Copy Details
+                              </button>
+                           </div>
+                        )}
+                     </div>
                  </div>
               </div>
               
@@ -692,46 +734,50 @@ END:VCALENDAR`;
             onDragEnd={handleDragEnd}
           >
             <SortableContext 
-              items={agenda.items.map(i => i.id)} 
+              items={filteredItems.map(i => i.id)} 
               strategy={verticalListSortingStrategy}
             >
-              {agenda.items.map((item) => {
-                const itemStartTime = currentTime;
-                currentTime = addMinutes(currentTime, item.durationMinutes);
-                return (
+              {filteredItems.map((item) => (
                   <SortableAgendaItem 
                     key={item.id} 
                     item={item} 
-                    startTime={itemStartTime}
+                    startTime={item.startTimeCalculated}
                     stakeholders={agenda.stakeholders}
                     onUpdate={handleItemUpdate}
                     onRemove={handleItemRemove}
+                    isDragDisabled={isSearching}
                   />
-                );
-              })}
+              ))}
+              {filteredItems.length === 0 && (
+                  <div className="text-center py-12 text-slate-400 text-sm">
+                      No topics match your search.
+                  </div>
+              )}
             </SortableContext>
           </DndContext>
           
           {/* Add Item Button */}
-          <div className="relative flex gap-8 pb-12">
-             <div className="w-16 flex-shrink-0"></div>
-             <div className="flex-1">
-                <button 
-                  onClick={handleAddItem}
-                  className="w-full py-4 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all font-medium text-sm group"
-                >
-                   <div className="w-6 h-6 rounded-full bg-slate-100 group-hover:bg-indigo-100 flex items-center justify-center">
-                      <Plus size={14} />
-                   </div>
-                   Add Agenda Item
-                </button>
-             </div>
-          </div>
+          {!isSearching && (
+              <div className="relative flex gap-8 pb-12">
+                 <div className="w-16 flex-shrink-0"></div>
+                 <div className="flex-1">
+                    <button 
+                      onClick={handleAddItem}
+                      className="w-full py-4 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center gap-2 text-slate-400 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all font-medium text-sm group"
+                    >
+                       <div className="w-6 h-6 rounded-full bg-slate-100 group-hover:bg-indigo-100 flex items-center justify-center">
+                          <Plus size={14} />
+                       </div>
+                       Add Agenda Item
+                    </button>
+                 </div>
+              </div>
+          )}
 
           {/* End Node */}
           <div className="relative flex gap-8">
              <div className="flex flex-col items-center w-16 flex-shrink-0">
-               <div className="text-sm font-bold text-slate-400">{currentTime}</div>
+               <div className="text-sm font-bold text-slate-400">{tempTime}</div>
              </div>
              <div className="absolute left-[31px] md:left-[47px] top-[7px] w-2.5 h-2.5 rounded-full bg-slate-300"></div>
              <div className="text-xs font-medium text-slate-400 pt-1.5 pl-4">End of meeting</div>

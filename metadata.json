@@ -1,5 +1,8 @@
 {
   "name": "Agenda",
   "description": "Upload documents to automatically generate structured meeting agendas with a customizable timeline, stakeholder management, and AI chat.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TimelineView } from './components/TimelineView';
 import { ChatWidget } from './components/ChatWidget';
-import { generateAgendaFromFile, ChatSession } from './services/geminiService';
+import { generateAgenda, ChatSession } from './services/geminiService';
 import { MeetingAgenda, UploadedFile } from './types';
 
 export default function App() {
@@ -10,12 +10,11 @@ export default function App() {
   const [agenda, setAgenda] = useState<MeetingAgenda | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('auto');
 
   const handleFileUpload = async (file: File) => {
-    setIsProcessing(true);
-    
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       const base64Data = (e.target?.result as string).split(',')[1];
       const newFile: UploadedFile = {
         name: file.name,
@@ -23,36 +22,41 @@ export default function App() {
         data: base64Data,
         size: file.size
       };
-
       setFiles(prev => [...prev, newFile]);
-
-      try {
-        // Generate Agenda
-        const generatedAgenda = await generateAgendaFromFile(base64Data, newFile.type);
-        setAgenda(generatedAgenda);
-
-        // Initialize Chat Session
-        const session = new ChatSession(base64Data, newFile.type);
-        setChatSession(session);
-        
-      } catch (error) {
-        console.error("Error processing file:", error);
-        alert("Failed to process the document. Please ensure it's a valid file and try again.");
-        // Remove the failed file
-        setFiles(prev => prev.filter(f => f.name !== file.name));
-      } finally {
-        setIsProcessing(false);
-      }
     };
-
     reader.readAsDataURL(file);
+  };
+
+  const handleGenerateAgenda = async () => {
+    // Check if we can generate: either files exist, OR a template other than 'auto' is selected
+    if (files.length === 0 && selectedTemplateId === 'auto') return;
+    
+    setIsProcessing(true);
+    setAgenda(null); // Clear previous agenda while loading
+    
+    try {
+      // Generate Agenda
+      const generatedAgenda = await generateAgenda(files, selectedTemplateId);
+      setAgenda(generatedAgenda);
+
+      // Initialize Chat Session with files and the generated agenda as context
+      const session = new ChatSession(files, generatedAgenda);
+      setChatSession(session);
+      
+    } catch (error) {
+      console.error("Error generating agenda:", error);
+      alert("Failed to generate agenda. Please check the inputs and try again.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleRemoveFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
-    if (files.length <= 1) {
-      setAgenda(null);
-      setChatSession(null);
+    if (files.length === 1 && selectedTemplateId === 'auto') { 
+        // If we remove the last file and no template is forced, clear agenda
+        setAgenda(null);
+        setChatSession(null);
     }
   };
   
@@ -66,7 +70,10 @@ export default function App() {
         files={files} 
         onFileUpload={handleFileUpload} 
         onRemoveFile={handleRemoveFile}
+        onGenerate={handleGenerateAgenda}
         isProcessing={isProcessing}
+        selectedTemplateId={selectedTemplateId}
+        onSelectTemplate={setSelectedTemplateId}
       />
       <main className="flex-1 h-full relative">
         <TimelineView 
