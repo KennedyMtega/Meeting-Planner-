@@ -73,45 +73,52 @@ async function generateContentWithFallback(params: {
   config: any;
 }): Promise<any> {
   const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
-  const maxAttempts = 3;
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        console.log(`[Gemini] Attempting generateContent using ${modelName} (Attempt ${attempt}/${maxAttempts})`);
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: params.contents,
-          config: params.config,
-        });
-        console.log(`[Gemini] Successfully completed generation using ${modelName}`);
-        return response;
-      } catch (error: any) {
-        lastError = error;
-        console.warn(`[Gemini] Error with model ${modelName} on attempt ${attempt}:`, error.message || error);
+    try {
+      console.log(`[Gemini] Attempting generateContent using ${modelName}`);
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: params.contents,
+        config: params.config,
+      });
+      console.log(`[Gemini] Successfully completed generation using ${modelName}`);
+      return response;
+    } catch (error: any) {
+      lastError = error;
+      console.log(`[Gemini] Model ${modelName} is currently busy or unavailable:`, error.message || error);
 
-        const errorStr = (error.message || "").toLowerCase();
-        const isTransient = errorStr.includes("503") ||
-                            errorStr.includes("unavailable") ||
-                            errorStr.includes("high demand") ||
-                            errorStr.includes("resource_exhausted") ||
-                            errorStr.includes("429");
+      const errorStr = (error.message || "").toLowerCase();
+      const isTransient = errorStr.includes("503") ||
+                          errorStr.includes("unavailable") ||
+                          errorStr.includes("high demand") ||
+                          errorStr.includes("resource_exhausted") ||
+                          errorStr.includes("429");
 
-        if (!isTransient) {
-          // If it is another type of error (like forbidden/unauthorized), propagate/fallback fast
-          break;
-        }
-
-        if (attempt < maxAttempts) {
-          const backoffTime = 1000 * attempt * 1.5;
-          console.log(`[Gemini] Retrying in ${backoffTime}ms due to transient error...`);
-          await new Promise(resolve => setTimeout(resolve, backoffTime));
-        }
+      if (!isTransient) {
+        // If it is another type of error (like forbidden/unauthorized), propagate instantly
+        throw error;
       }
     }
   }
-  throw lastError;
+
+  // If we exhausted all options, make a final attempt with gemini-3.1-flash-lite after a tiny delay
+  console.log("[Gemini] First-pass fallback failed. Pausing 1.5s before final retry...");
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  try {
+    console.log(`[Gemini] Attempting final fallback retry using gemini-3.1-flash-lite`);
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-flash-lite",
+      contents: params.contents,
+      config: params.config,
+    });
+    console.log(`[Gemini] Successfully completed generation on final fallback pass`);
+    return response;
+  } catch (error: any) {
+    console.error("[Gemini] All fallback methods failed:", error.message || error);
+    throw lastError || error;
+  }
 }
 
 // Helper to send chat message with automated retry and fallback to gemini-3.1-flash-lite
@@ -120,44 +127,51 @@ async function sendChatMessageWithFallback(params: {
   message: string;
 }): Promise<any> {
   const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
-  const maxAttempts = 3;
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        console.log(`[Gemini] Attempting sendChatMessage using ${modelName} (Attempt ${attempt}/${maxAttempts})`);
-        const chatInstance = ai.chats.create({
-          model: modelName,
-          history: params.history
-        });
-        const response = await chatInstance.sendMessage({ message: params.message });
-        console.log(`[Gemini] Successfully sent chat message using ${modelName}`);
-        return response;
-      } catch (error: any) {
-        lastError = error;
-        console.warn(`[Gemini] Chat error with model ${modelName} on attempt ${attempt}:`, error.message || error);
+    try {
+      console.log(`[Gemini] Attempting sendChatMessage using ${modelName}`);
+      const chatInstance = ai.chats.create({
+        model: modelName,
+        history: params.history
+      });
+      const response = await chatInstance.sendMessage({ message: params.message });
+      console.log(`[Gemini] Successfully sent chat message using ${modelName}`);
+      return response;
+    } catch (error: any) {
+      lastError = error;
+      console.log(`[Gemini] Model ${modelName} is busy or unavailable for chat:`, error.message || error);
 
-        const errorStr = (error.message || "").toLowerCase();
-        const isTransient = errorStr.includes("503") ||
-                            errorStr.includes("unavailable") ||
-                            errorStr.includes("high demand") ||
-                            errorStr.includes("resource_exhausted") ||
-                            errorStr.includes("429");
+      const errorStr = (error.message || "").toLowerCase();
+      const isTransient = errorStr.includes("503") ||
+                          errorStr.includes("unavailable") ||
+                          errorStr.includes("high demand") ||
+                          errorStr.includes("resource_exhausted") ||
+                          errorStr.includes("429");
 
-        if (!isTransient) {
-          break;
-        }
-
-        if (attempt < maxAttempts) {
-          const backoffTime = 1000 * attempt * 1.5;
-          console.log(`[Gemini] Retrying chat in ${backoffTime}ms due to transient error...`);
-          await new Promise(resolve => setTimeout(resolve, backoffTime));
-        }
+      if (!isTransient) {
+        throw error;
       }
     }
   }
-  throw lastError;
+
+  // If all failed, retry once on gemini-3.1-flash-lite with a short delay
+  console.log("[Gemini] Chat fallback failed. Pausing 1.5s before final chat fallback retry...");
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  try {
+    console.log(`[Gemini] Attempting final fallback chat retry using gemini-3.1-flash-lite`);
+    const chatInstance = ai.chats.create({
+      model: "gemini-3.1-flash-lite",
+      history: params.history
+    });
+    const response = await chatInstance.sendMessage({ message: params.message });
+    console.log(`[Gemini] Successfully completed final chat on fallback pass`);
+    return response;
+  } catch (error: any) {
+    console.error("[Gemini] Chat fallback final retry failed:", error.message || error);
+    throw lastError || error;
+  }
 }
 
 // API routes

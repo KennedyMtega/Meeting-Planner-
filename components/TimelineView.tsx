@@ -162,7 +162,7 @@ const SortableAgendaItem: React.FC<SortableItemProps> = ({ item, startTime, stak
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="relative flex gap-4 md:gap-8 pb-8 group">
+    <div ref={setNodeRef} style={style} id={`agenda-item-${item.id}`} className="relative flex gap-4 md:gap-8 pb-8 group">
       {/* Time Column */}
       <div className="flex flex-col items-center w-16 flex-shrink-0 pt-2">
         <div className="text-sm font-bold text-slate-900">{startTime}</div>
@@ -599,26 +599,26 @@ END:VCALENDAR`;
 
   return (
     <div className="flex-1 h-full overflow-y-auto bg-slate-50/30">
-      <div className="max-w-5xl mx-auto p-6 md:p-10 pb-32">
+      <div className="max-w-5xl mx-auto p-3 sm:p-6 md:p-10 pb-32">
         {/* Header Section */}
-        <div className="flex flex-col xl:flex-row gap-8 mb-12">
-           <div className="flex-1">
-              <div className="flex items-center justify-between mb-4">
-                 <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 text-white text-xs font-semibold rounded-full shadow-md shadow-slate-900/20">
+        <div className="flex flex-col xl:flex-row gap-4 sm:gap-6 md:gap-8 mb-6 sm:mb-10">
+           <div className="flex-1 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                 <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-900 text-white text-xs font-semibold rounded-full shadow-md shadow-slate-900/20 w-fit shrink-0">
                    <Clock size={12} />
                    {totalDuration} Minutes Total
                  </div>
                  
-                 <div className="flex items-center gap-2">
+                 <div className="flex items-center gap-2 w-full sm:w-auto">
                      {/* Search Bar */}
-                     <div className="relative group">
+                     <div className="relative group flex-grow sm:flex-initial">
                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
                          <input 
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Filter topics..."
-                            className="w-48 focus:w-64 transition-all pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-500 shadow-sm"
+                            className="w-full sm:w-36 md:w-48 sm:focus:w-52 md:focus:w-60 transition-all pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-500 shadow-sm"
                          />
                          {searchQuery && (
                             <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500">
@@ -626,15 +626,15 @@ END:VCALENDAR`;
                             </button>
                          )}
                      </div>
-
+ 
                      {/* Export Dropdown */}
                      <div className="relative">
                         <button 
                            onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                           className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
+                           className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm"
                         >
                            <Share2 size={16} />
-                           Share
+                           <span className="hidden min-[360px]:inline">Share</span>
                            <ChevronDown size={14} className={`transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
                         
@@ -656,18 +656,18 @@ END:VCALENDAR`;
                            </div>
                         )}
                      </div>
-                 </div>
+                  </div>
               </div>
               
-              <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight mb-4">
+              <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight leading-tight mb-3">
                 {agenda.title}
               </h1>
-              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-slate-600 leading-relaxed mb-6">
+              <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-sm text-slate-600 text-sm leading-relaxed mb-4">
                  {agenda.summary}
               </div>
               
-              <div className="flex flex-wrap items-center gap-4">
-                 <div className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-lg border border-slate-200">
+              <div className="flex flex-col min-[420px]:flex-row items-stretch min-[420px]:items-center gap-2 sm:gap-3">
+                 <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
                     <span className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
                         <CalendarIcon size={12}/> Date
                     </span>
@@ -675,10 +675,10 @@ END:VCALENDAR`;
                       type="date" 
                       value={meetingDate} 
                       onChange={(e) => setMeetingDate(e.target.value)}
-                      className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none"
+                      className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none min-w-0 flex-1"
                     />
                  </div>
-                 <div className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-lg border border-slate-200">
+                 <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
                     <span className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1">
                         <Clock size={12}/> Start
                     </span>
@@ -686,7 +686,7 @@ END:VCALENDAR`;
                       type="time" 
                       value={agenda.startTime} 
                       onChange={(e) => onUpdateAgenda({...agenda, startTime: e.target.value})}
-                      className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none"
+                      className="bg-transparent text-sm font-bold text-slate-900 focus:outline-none min-w-0"
                     />
                  </div>
               </div>

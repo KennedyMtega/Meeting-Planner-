@@ -87,10 +87,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ chatSession, hasFile }) 
   if (!hasFile) return null;
 
   return (
-    <div className={`fixed bottom-6 right-6 z-50 flex flex-col items-end pointer-events-none`}>
+    <div className={`fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 flex flex-col items-end pointer-events-none`}>
       {/* Chat Window */}
       <div 
-        className={`bg-white rounded-2xl shadow-2xl border border-slate-200 w-[380px] h-[500px] mb-4 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right pointer-events-auto ${
+        className={`bg-white rounded-2xl shadow-2xl border border-slate-200 w-[380px] max-w-[calc(100vw-2rem)] h-[500px] max-h-[calc(100vh-8rem)] mb-4 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right pointer-events-auto ${
           isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-8 pointer-events-none h-0 w-0 mb-0'
         }`}
       >

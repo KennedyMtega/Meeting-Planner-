@@ -1,5 +1,5 @@
-import React, { useRef } from 'react';
-import { Upload, FileText, X, Plus, Sparkles, Loader2, LayoutTemplate } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { Upload, FileText, X, Plus, Sparkles, Loader2, LayoutTemplate, ChevronDown, Check } from 'lucide-react';
 import { UploadedFile, MEETING_TEMPLATES } from '../types';
 
 interface SidebarProps {
@@ -10,6 +10,7 @@ interface SidebarProps {
   isProcessing: boolean;
   selectedTemplateId: string;
   onSelectTemplate: (id: string) => void;
+  onCollapse?: (collapsed: boolean) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -19,9 +20,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onGenerate, 
   isProcessing,
   selectedTemplateId,
-  onSelectTemplate
+  onSelectTemplate,
+  onCollapse
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -36,48 +51,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const canGenerate = files.length > 0 || selectedTemplateId !== 'auto';
+  const selectedTemplate = MEETING_TEMPLATES.find(t => t.id === selectedTemplateId) || MEETING_TEMPLATES[0];
 
   return (
-    <div className="w-80 h-full bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
-      <div className="p-6 border-b border-slate-100">
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white">
-            <FileText size={18} />
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Agenda</h1>
-        </div>
-        <p className="text-xs text-slate-500 ml-10">Meeting Breakdown Planner</p>
-      </div>
-
-      <div className="p-6 flex-1 overflow-y-auto flex flex-col">
+    <div className="w-full h-full bg-white flex flex-col">
+      <div className="p-4 sm:p-6 flex-grow overflow-y-auto flex flex-col">
         {/* Template Selector */}
-        <div className="mb-8">
+        <div className="mb-5 sm:mb-8" ref={dropdownRef}>
             <div className="flex items-center gap-2 mb-2 text-slate-400">
                 <LayoutTemplate size={14} />
                 <h2 className="text-xs font-semibold uppercase tracking-wider">Meeting Template</h2>
             </div>
             <div className="relative">
-                <select 
-                    value={selectedTemplateId}
-                    onChange={(e) => onSelectTemplate(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 font-medium focus:outline-none focus:border-indigo-500 appearance-none cursor-pointer hover:bg-slate-100 transition-colors"
+                <button
+                  type="button"
+                  id="template-dropdown-trigger"
+                  onClick={() => setDropdownOpen(!dropdownOpen)}
+                  className="w-full flex items-center justify-between p-3 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-sm text-slate-700 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-left cursor-pointer"
                 >
+                  <span className="truncate">{selectedTemplate.name}</span>
+                  <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 shrink-0 ml-2 ${dropdownOpen ? 'rotate-180 text-slate-600' : ''}`} />
+                </button>
+
+                {dropdownOpen && (
+                  <div 
+                    id="template-dropdown-menu"
+                    className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-100 rounded-xl shadow-xl z-50 py-1.5 max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-150"
+                  >
                     {MEETING_TEMPLATES.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          onSelectTemplate(t.id);
+                          setDropdownOpen(false);
+                        }}
+                        className={`flex items-center justify-between w-full px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer ${t.id === selectedTemplateId ? 'text-indigo-600 bg-indigo-50/30' : ''}`}
+                      >
+                        <span className="truncate">{t.name}</span>
+                        {t.id === selectedTemplateId && <Check size={14} className="text-indigo-600 shrink-0 ml-2" />}
+                      </button>
                     ))}
-                </select>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                    <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                </div>
+                  </div>
+                )}
             </div>
             {/* Template Description */}
             <p className="mt-2 text-[11px] text-slate-400">
-                {MEETING_TEMPLATES.find(t => t.id === selectedTemplateId)?.description}
-                {selectedTemplateId !== 'auto' && <span className="block text-indigo-500 mt-1">Structure: {MEETING_TEMPLATES.find(t => t.id === selectedTemplateId)?.structure}</span>}
+                {selectedTemplate.description}
+                {selectedTemplateId !== 'auto' && <span className="block text-indigo-500 mt-1">Structure: {selectedTemplate.structure}</span>}
             </p>
         </div>
+
 
         <div className="flex-1">
           <div className="flex items-center justify-between mb-4">
