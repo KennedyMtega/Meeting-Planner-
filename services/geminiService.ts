@@ -1,4 +1,4 @@
-import { MeetingAgenda, UploadedFile } from '../types.js';
+import { MeetingAgenda, UploadedFile, AgendaItem } from '../types.js';
 
 export const generateAgenda = async (files: UploadedFile[], templateId: string): Promise<MeetingAgenda> => {
   try {
@@ -9,6 +9,12 @@ export const generateAgenda = async (files: UploadedFile[], templateId: string):
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error("You are generating agendas too fast. Please take a small pause before submitting another request.");
+      }
+      if (response.status === 409) {
+        throw new Error("A generation request is currently underway. Please wait until the previous draft compiles.");
+      }
       const errData = await response.json().catch(() => ({}));
       throw new Error(errData.error || "Failed to generate meeting agenda.");
     }
@@ -20,47 +26,29 @@ export const generateAgenda = async (files: UploadedFile[], templateId: string):
   }
 };
 
-export class ChatSession {
-  private files: UploadedFile[];
-  private agendaContext?: MeetingAgenda;
-  private messages: Array<{ sender: string; text: string }> = [];
+export const suggestNextItem = async (agendaContext: MeetingAgenda, existingItems: AgendaItem[]): Promise<AgendaItem> => {
+  try {
+    const response = await fetch("/api/suggest-next-item", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ agendaContext, existingItems })
+    });
 
-  constructor(files: UploadedFile[], agendaContext?: MeetingAgenda) {
-    this.files = files;
-    this.agendaContext = agendaContext;
-  }
-
-  async init() {
-    this.messages = [];
-  }
-
-  async sendMessage(message: string): Promise<string> {
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          files: this.files,
-          agendaContext: this.agendaContext,
-          messages: this.messages,
-          message: message
-        })
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to process chat request.");
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error("You are requesting suggestions too fast. Please take a small pause.");
       }
-
-      const data = await response.json();
-      
-      this.messages.push({ sender: 'user', text: message });
-      this.messages.push({ sender: 'model', text: data.text });
-
-      return data.text;
-    } catch (error) {
-      console.error("Chat Session API Error:", error);
-      throw error;
+      if (response.status === 409) {
+        throw new Error("Another suggestion query is already generating. Please wait a brief moment.");
+      }
+       const errData = await response.json().catch(() => ({}));
+       throw new Error(errData.error || "Failed to suggest next item.");
     }
+
+    return await response.json();
+  } catch (error) {
+    console.error("suggestNextItem API Error:", error);
+    throw error;
   }
-}
+};
+

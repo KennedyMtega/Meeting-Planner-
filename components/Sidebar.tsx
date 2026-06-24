@@ -86,7 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           onSelectTemplate(t.id);
                           setDropdownOpen(false);
                         }}
-                        className={`flex items-center justify-between w-full px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer ${t.id === selectedTemplateId ? 'text-indigo-600 bg-indigo-50/30' : ''}`}
+                        className={`flex items-center justify-between w-full px-4 py-3 min-h-[44px] text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer ${t.id === selectedTemplateId ? 'text-indigo-600 bg-indigo-50/30' : ''}`}
                       >
                         <span className="truncate">{t.name}</span>
                         {t.id === selectedTemplateId && <Check size={14} className="text-indigo-600 shrink-0 ml-2" />}
@@ -135,7 +135,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                   <button 
                     onClick={(e) => { e.stopPropagation(); onRemoveFile(idx); }}
-                    className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                    className="text-slate-400 hover:text-red-500 hover:bg-slate-100 hover:border-slate-200 border border-transparent rounded-lg transition-colors w-11 h-11 flex items-center justify-center shrink-0 -my-1.5 -mr-1.5 cursor-pointer"
+                    title="Remove document"
                   >
                     <X size={14} />
                   </button>
@@ -145,7 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button 
                 onClick={triggerUpload}
                 disabled={isProcessing}
-                className="w-full py-2 flex items-center justify-center gap-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50"
+                className="w-full min-h-[44px] py-2.5 flex items-center justify-center gap-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50 cursor-pointer"
               >
                 <Plus size={14} />
                 Add another file
@@ -158,26 +159,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
              <button
                onClick={onGenerate}
                disabled={isProcessing || !canGenerate}
-               className="w-full py-3 bg-slate-900 hover:bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 disabled:hover:scale-100 disabled:bg-slate-300 disabled:shadow-none"
+               className="w-full min-h-[44px] sm:min-h-[48px] md:min-h-[52px] py-2.5 sm:py-3 px-4 bg-slate-900 hover:bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-200/45 flex items-center justify-center gap-2 font-bold text-xs sm:text-xs md:text-sm uppercase tracking-wider transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 disabled:hover:scale-100 disabled:bg-slate-300 disabled:shadow-none cursor-pointer select-none"
              >
                {isProcessing ? (
                  <>
-                   <Loader2 size={18} className="animate-spin" />
-                   {files.length > 0 ? `Analyzing ${files.length} Files...` : 'Generating Template...'}
+                   <Loader2 size={16} className="animate-spin shrink-0" />
+                   <span className="truncate">{files.length > 0 ? `Analyzing ${files.length} documents...` : 'Building structure...'}</span>
                  </>
                ) : (
                  <>
-                   <Sparkles size={18} className="text-yellow-300" />
-                   {files.length > 0 ? 'Generate Agenda' : 'Create Template'}
+                   <Sparkles size={16} className="text-yellow-300 shrink-0" />
+                   <span className="truncate">{files.length > 0 ? 'Generate Agenda' : 'Create Template'}</span>
                  </>
                )}
              </button>
-             <p className="text-[10px] text-center text-slate-400 mt-2">
+             <p className="text-[10px] text-center text-slate-400 mt-2 font-medium">
                {files.length > 0 
-                  ? 'Synthesizes uploaded documents' 
+                  ? 'Synthesizes uploaded documents with Gemini' 
                   : selectedTemplateId !== 'auto' 
-                    ? 'Generates a blank structure'
-                    : 'Upload files or select a template'}
+                    ? 'Generates a fresh starter meeting blueprint'
+                    : 'Upload files or choose a template layout'}
              </p>
         </div>
       </div>
@@ -191,8 +192,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         accept=".pdf,.txt,.md,.json,.csv,.jpg,.png,.jpeg"
       />
       
-      <div className="p-4 border-t border-slate-100 bg-slate-50 text-center">
-        <p className="text-[10px] text-slate-400">Powered by Google Gemini 2.5 & 3 Pro</p>
+      <div className="p-3.5 sm:p-4 border-t border-slate-100 bg-slate-50/80 text-center select-none shrink-0">
+        <p className="text-[10px] sm:text-[11px] text-slate-405 text-slate-400 font-medium tracking-tight">
+          Built by <span className="font-bold text-slate-600">Digitronics</span> • Designed by <span className="font-bold text-slate-600">Kennedy Mtega</span>
+        </p>
       </div>
     </div>
   );

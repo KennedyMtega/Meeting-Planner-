@@ -64,15 +64,72 @@ const agendaSchema: Schema = {
   required: ["title", "stakeholders", "items", "startTime"]
 };
 
+// Simple in-memory rate limiting map
+// Keys: IP addresses, Values: { count: number, resetTime: number }
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+const rateLimiter = (limit: number, windowMs: number) => {
+  return (req: any, res: any, next: any) => {
+    const ip = (req.headers['x-forwarded-for'] as string) || req.ip || 'unknown';
+    const now = Date.now();
+    const record = rateLimitMap.get(ip);
+
+    if (!record || now > record.resetTime) {
+      rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
+      return next();
+    }
+
+    if (record.count >= limit) {
+      return res.status(429).json({
+        error: "You are sending requests too quickly. Please wait a moment before trying again.",
+        retryAfterMs: Math.max(0, record.resetTime - now)
+      });
+    }
+
+    record.count += 1;
+    next();
+  };
+};
+
+// Simple in-memory lock map to prevent simultaneous multi-clicks with automatic timeout fallback
+const activeRequestsLock = new Map<string, number>();
+
+const concurrencyGuard = (req: any, res: any, next: any) => {
+  const ip = (req.headers['x-forwarded-for'] as string) || req.ip || 'unknown';
+  const path = req.path;
+  const lockKey = `${ip}:${path}`;
+  const now = Date.now();
+
+  const existingLockExpiration = activeRequestsLock.get(lockKey);
+  if (existingLockExpiration && now < existingLockExpiration) {
+    return res.status(409).json({
+      error: "A request is already being processed for this action. Please wait until it completes."
+    });
+  }
+
+  // Lock key for max 45 seconds to prevent stale states in case connection close events are lost
+  activeRequestsLock.set(lockKey, now + 45000);
+
+  const releaseLock = () => {
+    activeRequestsLock.delete(lockKey);
+  };
+
+  res.on('finish', releaseLock);
+  res.on('close', releaseLock);
+  res.on('error', releaseLock);
+
+  next();
+};
+
 // Helper to generate UUID-like strings
 const generateId = () => Math.random().toString(36).substring(2, 11);
 
-// Helper to run content generation with automated retry and fallback to gemini-3.1-flash-lite
+// Helper to run content generation with automated retry and fallback to gemini-3.1-flash-lite/gemini-flash-latest
 async function generateContentWithFallback(params: {
   contents: any;
   config: any;
 }): Promise<any> {
-  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
+  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
@@ -87,29 +144,40 @@ async function generateContentWithFallback(params: {
       return response;
     } catch (error: any) {
       lastError = error;
-      console.log(`[Gemini] Model ${modelName} is currently busy or unavailable:`, error.message || error);
+      const originalMessage = error.message || "";
+      console.log(`[Gemini] Model ${modelName} is currently busy or unavailable:`, originalMessage || error);
 
-      const errorStr = (error.message || "").toLowerCase();
-      const isTransient = errorStr.includes("503") ||
-                          errorStr.includes("unavailable") ||
-                          errorStr.includes("high demand") ||
-                          errorStr.includes("resource_exhausted") ||
-                          errorStr.includes("429");
+      let errorDetails = "";
+      try {
+        errorDetails = JSON.stringify(error);
+      } catch (e) {
+        errorDetails = String(error);
+      }
+      const errorStr = `${originalMessage} ${errorDetails} ${error}`.toLowerCase();
+      
+      // If it is an API key or auth error, propagate instantly
+      const isAuthError = errorStr.includes("api key") || 
+                          errorStr.includes("apikey") || 
+                          errorStr.includes("unauthorized") || 
+                          errorStr.includes("forbidden") || 
+                          errorStr.includes("key_invalid") || 
+                          errorStr.includes("key is invalid") ||
+                          errorStr.includes("refused") ||
+                          errorStr.includes("keyNotAssociatedWithProject");
 
-      if (!isTransient) {
-        // If it is another type of error (like forbidden/unauthorized), propagate instantly
+      if (isAuthError) {
         throw error;
       }
     }
   }
 
-  // If we exhausted all options, make a final attempt with gemini-3.1-flash-lite after a tiny delay
-  console.log("[Gemini] First-pass fallback failed. Pausing 1.5s before final retry...");
+  // If we exhausted all options, make a final attempt with gemini-flash-latest after a tiny delay
+  console.log("[Gemini] First-pass fallback failed. Pausing 1.5s before final retry with gemini-flash-latest...");
   await new Promise(resolve => setTimeout(resolve, 1500));
   try {
-    console.log(`[Gemini] Attempting final fallback retry using gemini-3.1-flash-lite`);
+    console.log(`[Gemini] Attempting final fallback retry using gemini-flash-latest`);
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-flash-latest",
       contents: params.contents,
       config: params.config,
     });
@@ -121,12 +189,12 @@ async function generateContentWithFallback(params: {
   }
 }
 
-// Helper to send chat message with automated retry and fallback to gemini-3.1-flash-lite
+// Helper to send chat message with automated retry and fallback to gemini-3.1-flash-lite/gemini-flash-latest
 async function sendChatMessageWithFallback(params: {
   history: any;
   message: string;
 }): Promise<any> {
-  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
+  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
@@ -141,28 +209,40 @@ async function sendChatMessageWithFallback(params: {
       return response;
     } catch (error: any) {
       lastError = error;
-      console.log(`[Gemini] Model ${modelName} is busy or unavailable for chat:`, error.message || error);
+      const originalMessage = error.message || "";
+      console.log(`[Gemini] Model ${modelName} is busy or unavailable for chat:`, originalMessage || error);
 
-      const errorStr = (error.message || "").toLowerCase();
-      const isTransient = errorStr.includes("503") ||
-                          errorStr.includes("unavailable") ||
-                          errorStr.includes("high demand") ||
-                          errorStr.includes("resource_exhausted") ||
-                          errorStr.includes("429");
+      let errorDetails = "";
+      try {
+        errorDetails = JSON.stringify(error);
+      } catch (e) {
+        errorDetails = String(error);
+      }
+      const errorStr = `${originalMessage} ${errorDetails} ${error}`.toLowerCase();
+      
+      // If it is an API key or auth error, propagate instantly
+      const isAuthError = errorStr.includes("api key") || 
+                          errorStr.includes("apikey") || 
+                          errorStr.includes("unauthorized") || 
+                          errorStr.includes("forbidden") || 
+                          errorStr.includes("key_invalid") || 
+                          errorStr.includes("key is invalid") ||
+                          errorStr.includes("refused") ||
+                          errorStr.includes("keyNotAssociatedWithProject");
 
-      if (!isTransient) {
+      if (isAuthError) {
         throw error;
       }
     }
   }
 
-  // If all failed, retry once on gemini-3.1-flash-lite with a short delay
+  // If all failed, retry once on gemini-flash-latest with a short delay
   console.log("[Gemini] Chat fallback failed. Pausing 1.5s before final chat fallback retry...");
   await new Promise(resolve => setTimeout(resolve, 1500));
   try {
-    console.log(`[Gemini] Attempting final fallback chat retry using gemini-3.1-flash-lite`);
+    console.log(`[Gemini] Attempting final fallback chat retry using gemini-flash-latest`);
     const chatInstance = ai.chats.create({
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-flash-latest",
       history: params.history
     });
     const response = await chatInstance.sendMessage({ message: params.message });
@@ -179,7 +259,7 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", mode: process.env.NODE_ENV, hasApiKey: !!process.env.GEMINI_API_KEY });
 });
 
-app.post("/api/generate-agenda", async (req, res) => {
+app.post("/api/generate-agenda", rateLimiter(15, 60000), concurrencyGuard, async (req, res) => {
   try {
     if (!process.env.GEMINI_API_KEY) {
       return res.status(400).json({ error: "Gemini API key is not configured on the server. Please add GEMINI_API_KEY in Settings." });
@@ -265,69 +345,71 @@ app.post("/api/generate-agenda", async (req, res) => {
   }
 });
 
-app.post("/api/chat", async (req, res) => {
+app.post("/api/suggest-next-item", rateLimiter(15, 60000), concurrencyGuard, async (req, res) => {
   try {
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(400).json({ error: "Gemini API key is not configured on the server." });
+      return res.status(400).json({ error: "Gemini API key is not configured on the server. Please check Settings." });
     }
 
-    const { files = [], agendaContext, messages = [], message = "" } = req.body;
+    const { agendaContext, existingItems = [] } = req.body;
+    let promptText = `Given a meeting titled "${agendaContext?.title || 'Meeting'}" with purpose: "${agendaContext?.summary || 'Collaboration'}".\n`;
+    promptText += `The current agenda has the following topics already:\n`;
+    existingItems.forEach((it: any, index: number) => {
+      promptText += `${index+1}. ${it.topic} (${it.durationMinutes}m) - ${it.description}\n`;
+    });
+    promptText += `\nGenerate the next logical topic/session that should be discussed in this meeting to make it successful.
+Include:
+1. A descriptive, professional topic header
+2. Detailed description of what to discuss next
+3. Estimated duration in minutes (usually between 10 to 30 minutes)
+4. 2-3 specific points to address during discussion
+5. An expected concrete outcome of this session.
+Return as a JSON object matching this schema.`;
 
-    const fileParts = files.map((file: any) => ({
-      inlineData: {
-        mimeType: file.type,
-        data: file.data
-      }
-    }));
-
-    let contextText = "I have access to the meeting agenda.";
-    if (agendaContext) {
-      contextText += ` The meeting is "${agendaContext.title}". Summary: ${agendaContext.summary}.`;
-    }
-
-    const baseParts = [...fileParts];
-    if (baseParts.length === 0) {
-      baseParts.push({ text: contextText + " Please answer questions based on the generated agenda I just provided." });
-    } else {
-      baseParts.push({ text: contextText + " I have uploaded these documents. Please answer my future questions based on them and the agenda. Be concise and helpful." });
-    }
-
-    // Build history
-    const history: any[] = [
-      {
-        role: "user",
-        parts: baseParts
+    const singleItemSchema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        durationMinutes: { type: Type.NUMBER, description: "Duration of this suggested topic in minutes" },
+        topic: { type: Type.STRING, description: "Descriptive topic header" },
+        description: { type: Type.STRING, description: "Details about what will be discussed" },
+        keyPoints: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: "List of 2-3 specific points to address during this block"
+        },
+        expectedOutcome: { type: Type.STRING, description: "The specific goal or outcome expected" }
       },
-      {
-        role: "model",
-        parts: [{ text: "Understood. I am ready to answer your questions about the meeting and documents." }]
-      }
-    ];
+      required: ["topic", "durationMinutes", "description"]
+    };
 
-    // Append subsequent messages as conversational history, EXCEPT the latest user message
-    messages.forEach((msg: any) => {
-      if (msg.sender === "user") {
-        history.push({
-          role: "user",
-          parts: [{ text: msg.text }]
-        });
-      } else if (msg.sender === "model") {
-        history.push({
-          role: "model",
-          parts: [{ text: msg.text }]
-        });
+    const response = await generateContentWithFallback({
+      contents: {
+        parts: [{ text: promptText }]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: singleItemSchema,
+        temperature: 0.7,
       }
     });
 
-    const response = await sendChatMessageWithFallback({
-      history,
-      message
-    });
-    res.json({ text: response.text || "I couldn't generate a response." });
+    if (!response.text) {
+      throw new Error("No suggestion text received from Gemini.");
+    }
 
+    const rawItem = JSON.parse(response.text);
+    res.json({
+      id: generateId(),
+      topic: rawItem.topic || "Suggested Topic",
+      description: rawItem.description || "Suggested details of discussion.",
+      durationMinutes: rawItem.durationMinutes || 15,
+      speakerIds: [],
+      keyPoints: rawItem.keyPoints || [],
+      expectedOutcome: rawItem.expectedOutcome || ""
+    });
   } catch (error: any) {
-    console.error("Server Chat Error:", error);
-    res.status(500).json({ error: error.message || "Failed to process chat message." });
+    console.error("Server suggest-next-item Error:", error);
+    res.status(500).json({ error: error.message || "Failed to suggest the next item." });
   }
 });
 

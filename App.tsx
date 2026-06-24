@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TimelineView } from './components/TimelineView';
-import { ChatWidget } from './components/ChatWidget';
+import { LandingPage } from './components/LandingPage';
 import { TemplatesExplorer } from './components/TemplatesExplorer';
 import { AgendaHistory } from './components/AgendaHistory';
 import { AgendaAnalytics } from './components/AgendaAnalytics';
-import { DropdownsDoc } from './components/DropdownsDoc';
-import { generateAgenda, ChatSession } from './services/geminiService';
+import { generateAgenda } from './services/geminiService';
 import { MeetingAgenda, UploadedFile } from './types';
 import { 
   Sliders, Calendar, Sparkles, PanelLeftOpen, ChevronRight,
   CalendarPlus, Clock, History, BarChart3, LayoutTemplate,
-  CheckCircle, CheckSquare, Square, Menu, X, ArrowRight, Play, Check, Code2 
+  CheckCircle, CheckSquare, Square, Menu, X, ArrowRight, Play, Check 
 } from 'lucide-react';
 
 interface SavedAgendaItem {
@@ -27,11 +26,11 @@ export default function App() {
   const [savedAgendas, setSavedAgendas] = useState<SavedAgendaItem[]>([]);
   const [selectedAgendaId, setSelectedAgendaId] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'create' | 'active' | 'history' | 'templates' | 'analytics'>('create');
+  const [showLanding, setShowLanding] = useState(true);
   
   const [isProcessing, setIsProcessing] = useState(false);
-  const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState('auto');
-  const [activeTab, setActiveTab] = useState<'setup' | 'agenda' | 'dropdowns'>('setup');
+  const [activeTab, setActiveTab] = useState<'setup' | 'agenda'>('setup');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   
   // Completed items per agenda: record map [agendaId_itemId] -> boolean
@@ -40,6 +39,19 @@ export default function App() {
   // Active derived states
   const activeSavedItem = savedAgendas.find(item => item.id === selectedAgendaId) || null;
   const agenda = activeSavedItem ? activeSavedItem.agenda : null;
+
+  const handleGetStartedFromLanding = () => {
+    setShowLanding(false);
+    setSidebarTab('create');
+    setActiveTab('setup');
+  };
+
+  const handleLoadPresetFromLanding = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    setShowLanding(false);
+    setSidebarTab('create');
+    setActiveTab('setup');
+  };
 
   const handleFileUpload = async (file: File) => {
     const reader = new FileReader();
@@ -58,6 +70,7 @@ export default function App() {
 
   const handleGenerateAgenda = async () => {
     if (files.length === 0 && selectedTemplateId === 'auto') return;
+    if (isProcessing) return;
     
     setIsProcessing(true);
     setActiveTab('agenda');
@@ -77,14 +90,10 @@ export default function App() {
       
       setSavedAgendas(prev => [newItem, ...prev]);
       setSelectedAgendaId(newId);
-
-      // Initialize Chat Session
-      const session = new ChatSession(files, generatedAgenda);
-      setChatSession(session);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating agenda:", error);
-      alert("Failed to generate agenda. Please check inputs and try again.");
+      alert(error.message || "Failed to generate agenda. Please check inputs or verify settings key.");
       setActiveTab('setup');
       setSidebarTab('create');
     } finally {
@@ -107,16 +116,46 @@ export default function App() {
     }
   };
 
+  const handleCreateBlankAgenda = () => {
+    const newId = 'session_' + Date.now();
+    const newAgenda: MeetingAgenda = {
+      title: "New Meeting Agenda",
+      summary: "This is a freshly created blank meeting agenda. Use the controls to customize items, add key objectives, and assign stakeholders.",
+      startTime: "09:00",
+      stakeholders: [
+        { id: 'sh_1', name: "Project Lead", role: "Facilitator", contact: "" }
+      ],
+      items: [
+        {
+          id: 'item_1',
+          topic: "Welcome & Objective Alignment",
+          description: "Establish the target goal of the meeting, review attendee presence, and outline expected outcomes.",
+          durationMinutes: 10,
+          speakerIds: ['sh_1'],
+          keyPoints: ["Opening comments", "Agenda review"],
+          expectedOutcome: "Alignment on target milestones"
+        }
+      ]
+    };
+    const newItem: SavedAgendaItem = {
+      id: newId,
+      agenda: newAgenda,
+      timestamp: new Date(),
+      templateId: 'custom',
+      files: []
+    };
+    setSavedAgendas(prev => [newItem, ...prev]);
+    setSelectedAgendaId(newId);
+    setActiveTab('agenda');
+    setSidebarTab('active');
+  };
+
   const handleSelectAgenda = (id: string) => {
     const selected = savedAgendas.find(item => item.id === id);
     if (selected) {
       setSelectedAgendaId(id);
       setActiveTab('agenda');
       setSidebarTab('active');
-      
-      // Update session context
-      const session = new ChatSession(selected.files, selected.agenda);
-      setChatSession(session);
     }
   };
 
@@ -126,11 +165,8 @@ export default function App() {
     if (selectedAgendaId === id) {
       if (updated.length > 0) {
         setSelectedAgendaId(updated[0].id);
-        const session = new ChatSession(updated[0].files, updated[0].agenda);
-        setChatSession(session);
       } else {
         setSelectedAgendaId(null);
-        setChatSession(null);
         setSidebarTab('create');
         setActiveTab('setup');
       }
@@ -186,8 +222,17 @@ export default function App() {
   const completedCount = activeItems.filter(item => !!completedItems[`${selectedAgendaId}_${item.id}`]).length;
   const progressPct = activeItems.length > 0 ? Math.round((completedCount / activeItems.length) * 100) : 0;
 
+  if (showLanding) {
+    return (
+      <LandingPage 
+        onGetStarted={handleGetStartedFromLanding}
+        onLoadPreset={handleLoadPresetFromLanding}
+      />
+    );
+  }
+
   return (
-    <div className="flex flex-col md:flex-row h-screen w-screen bg-slate-50 overflow-hidden relative font-sans">
+    <div className="flex flex-col h-screen w-screen bg-slate-50 overflow-hidden relative font-sans">
       {/* High-density Unified Tab Header */}
       <header className="w-full bg-slate-900 text-white flex flex-col shrink-0 border-b border-slate-800 z-20">
         <div className="flex items-center justify-between px-4 py-3">
@@ -198,6 +243,14 @@ export default function App() {
             <span className="text-sm font-bold tracking-tight">Agenda Planner</span>
           </div>
           <div className="flex gap-1 p-0.5 bg-slate-800 rounded-lg">
+            <button
+              onClick={() => setShowLanding(true)}
+              className="px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all text-slate-400 hover:text-white"
+              title="Return to Landing Page"
+            >
+              <LayoutTemplate size={11} />
+              Home
+            </button>
             <button
               onClick={() => setActiveTab('setup')}
               className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
@@ -223,17 +276,6 @@ export default function App() {
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 border border-slate-900 rounded-full"></span>
               )}
             </button>
-            <button
-              onClick={() => setActiveTab('dropdowns')}
-              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
-                activeTab === 'dropdowns'
-                  ? 'bg-indigo-600 text-white shadow-sm font-bold'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Code2 size={11} />
-              Dropdowns
-            </button>
           </div>
         </div>
       </header>
@@ -242,14 +284,16 @@ export default function App() {
       {isSidebarCollapsed && (
         <button
           onClick={() => setIsSidebarCollapsed(false)}
-          className="hidden md:flex fixed left-4 top-4 z-40 p-2.5 bg-slate-900 text-white hover:bg-indigo-600 rounded-xl shadow-lg hover:shadow-indigo-100 border border-slate-800 hover:scale-105 transition-all cursor-pointer items-center justify-center"
+          className="hidden md:flex fixed left-4 top-16 z-40 p-2.5 bg-slate-900 text-white hover:bg-indigo-600 rounded-xl shadow-lg hover:shadow-indigo-100 border border-slate-800 hover:scale-105 transition-all cursor-pointer items-center justify-center"
           title="Expand Sidebar"
         >
           <PanelLeftOpen size={18} />
         </button>
       )}
 
-      {/* Interactive Desktop Changeable Side Nav & Primary Sidebar wrapper */}
+      {/* Main Workspace Frame container */}
+      <div className="flex-1 flex flex-col md:flex-row min-h-0 min-w-0 overflow-hidden relative">
+        {/* Interactive Desktop Changeable Side Nav & Primary Sidebar wrapper */}
       <div 
         className={`h-full shrink-0 transition-all duration-300 ease-in-out flex border-r border-slate-200 bg-white ${
           isSidebarCollapsed 
@@ -257,7 +301,7 @@ export default function App() {
             : 'md:w-[400px]'
         } ${
           activeTab === 'setup' ? 'flex w-full' : 'hidden md:flex'
-        } ${activeTab === 'dropdowns' ? 'hidden' : ''}`}
+        }`}
       >
         {/* Changeable Sidebar Component viewport with Unified Top Level Navigation */}
         <div className="flex-1 flex flex-col h-full bg-white relative overflow-hidden">
@@ -300,7 +344,7 @@ export default function App() {
             <div className="grid grid-cols-5 gap-1 p-1 bg-slate-200/60 rounded-xl">
               <button
                 onClick={() => setSidebarTab('create')}
-                className={`flex flex-col items-center justify-center py-1.5 rounded-lg transition-all gap-0.5 cursor-pointer ${
+                className={`flex flex-col items-center justify-center py-2 min-h-[44px] rounded-lg transition-all gap-0.5 cursor-pointer ${
                   sidebarTab === 'create' 
                     ? 'bg-white text-indigo-600 shadow-sm font-bold' 
                     : 'text-slate-500 hover:text-slate-950 hover:bg-slate-105-0 font-medium'
@@ -320,7 +364,7 @@ export default function App() {
                   }
                 }}
                 disabled={!agenda}
-                className={`flex flex-col items-center justify-center py-1.5 rounded-lg transition-all gap-0.5 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                className={`flex flex-col items-center justify-center py-2 min-h-[44px] rounded-lg transition-all gap-0.5 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
                   sidebarTab === 'active' 
                     ? 'bg-white text-indigo-600 shadow-sm font-bold' 
                     : 'text-slate-500 hover:text-slate-950 font-medium'
@@ -340,7 +384,7 @@ export default function App() {
 
               <button
                 onClick={() => setSidebarTab('history')}
-                className={`flex flex-col items-center justify-center py-1.5 rounded-lg transition-all gap-0.5 cursor-pointer ${
+                className={`flex flex-col items-center justify-center py-2 min-h-[44px] rounded-lg transition-all gap-0.5 cursor-pointer ${
                   sidebarTab === 'history' 
                     ? 'bg-white text-indigo-600 shadow-sm font-bold' 
                     : 'text-slate-500 hover:text-slate-950 font-medium'
@@ -360,7 +404,7 @@ export default function App() {
 
               <button
                 onClick={() => setSidebarTab('templates')}
-                className={`flex flex-col items-center justify-center py-1.5 rounded-lg transition-all gap-0.5 cursor-pointer ${
+                className={`flex flex-col items-center justify-center py-2 min-h-[44px] rounded-lg transition-all gap-0.5 cursor-pointer ${
                   sidebarTab === 'templates' 
                     ? 'bg-white text-indigo-600 shadow-sm font-bold' 
                     : 'text-slate-500 hover:text-slate-950 font-medium'
@@ -380,7 +424,7 @@ export default function App() {
                   }
                 }}
                 disabled={!agenda}
-                className={`flex flex-col items-center justify-center py-1.5 rounded-lg transition-all gap-0.5 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                className={`flex flex-col items-center justify-center py-2 min-h-[44px] rounded-lg transition-all gap-0.5 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
                   sidebarTab === 'analytics' 
                     ? 'bg-white text-indigo-600 shadow-sm font-bold' 
                     : 'text-slate-500 hover:text-slate-950 font-medium'
@@ -452,11 +496,11 @@ export default function App() {
                               }}
                               className="pt-0.5 shrink-0"
                             >
-                              <button className="text-slate-400 hover:text-indigo-600 transition-colors p-0.5 cursor-pointer">
+                              <button className="text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-colors w-11 h-11 flex items-center justify-center -ml-2 -my-2 rounded-xl cursor-pointer">
                                 {isCompleted ? (
-                                  <CheckSquare size={17} className="text-indigo-600" />
+                                  <CheckSquare size={18} className="text-indigo-600" />
                                 ) : (
-                                  <Square size={17} />
+                                  <Square size={18} />
                                 )}
                               </button>
                             </div>
@@ -537,20 +581,15 @@ export default function App() {
       </div>
 
       {/* Main Agenda Timeline & Chat */}
-      <main className={`flex-1 h-full min-w-0 relative overflow-hidden transition-all duration-300 ${activeTab === 'setup' ? 'hidden md:flex md:flex-col' : 'flex flex-col'}`}>
-        {activeTab === 'dropdowns' ? (
-          <DropdownsDoc />
-        ) : (
-          <>
-            <TimelineView 
-              agenda={agenda} 
-              isLoading={isProcessing} 
-              onUpdateAgenda={handleUpdateAgenda}
-            />
-            <ChatWidget chatSession={chatSession} hasFile={!!agenda} />
-          </>
-        )}
+      <main className={`flex-1 h-full min-h-0 min-w-0 relative overflow-hidden transition-all duration-300 ${activeTab === 'setup' ? 'hidden md:flex md:flex-col' : 'flex flex-col'}`}>
+        <TimelineView 
+          agenda={agenda} 
+          isLoading={isProcessing} 
+          onUpdateAgenda={handleUpdateAgenda}
+          onCreateBlankAgenda={handleCreateBlankAgenda}
+        />
       </main>
+      </div>
     </div>
   );
 }
