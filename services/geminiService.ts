@@ -1,11 +1,11 @@
 import { MeetingAgenda, UploadedFile, AgendaItem } from '../types.js';
 
-export const generateAgenda = async (files: UploadedFile[], templateId: string): Promise<MeetingAgenda> => {
+export const generateAgenda = async (files: UploadedFile[], templateId: string, customInstructions: string = ""): Promise<MeetingAgenda> => {
   try {
     const response = await fetch("/api/generate-agenda", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ files, templateId })
+      body: JSON.stringify({ files, templateId, customInstructions })
     });
 
     if (!response.ok) {

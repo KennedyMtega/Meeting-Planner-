@@ -265,7 +265,7 @@ app.post("/api/generate-agenda", rateLimiter(15, 60000), concurrencyGuard, async
       return res.status(400).json({ error: "Gemini API key is not configured on the server. Please add GEMINI_API_KEY in Settings." });
     }
 
-    const { files = [], templateId = "auto" } = req.body;
+    const { files = [], templateId = "auto", customInstructions = "" } = req.body;
     const selectedTemplate = MEETING_TEMPLATES.find((t: any) => t.id === templateId) || MEETING_TEMPLATES[0];
     const hasFiles = files.length > 0;
 
@@ -280,6 +280,10 @@ app.post("/api/generate-agenda", rateLimiter(15, 60000), concurrencyGuard, async
       promptText += "Identify key stakeholders (with roles), topics to discuss, and estimate time for each based on the content complexity. Include key discussion points and expected outcomes for each topic.";
     } else {
       promptText = `Generate a realistic, comprehensive example agenda for a '${selectedTemplate.name}' meeting. \\n\\nThe structure MUST be: ${selectedTemplate.structure}. \\n\\nCreate realistic placeholder content, topics, descriptions, and stakeholders that would typically appear in this type of meeting. Ensure the duration is appropriate for a ${selectedTemplate.name}.`;
+    }
+
+    if (customInstructions && customInstructions.trim()) {
+      promptText += `\n\nCRITICAL USER GUIDELINES / KEY FOCUS POINTS:\nYou MUST strictly adhere to the following direct manual constraints or focus areas requested by the user:\n"${customInstructions.trim()}"`;
     }
 
     const fileParts = files.map((file: any) => ({

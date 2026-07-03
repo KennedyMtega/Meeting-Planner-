@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MeetingAgenda, AgendaItem, Stakeholder } from '../types';
+import { MeetingAgenda, AgendaItem, Stakeholder, UploadedFile, MEETING_TEMPLATES, SavedAgendaItem } from '../types';
 import { 
   Clock, Users, Calendar, User, Plus, Trash2, Edit2, Check, X, Mail, 
   Share2, Download, Link as LinkIcon, FileText as FileTextIcon, ChevronDown, ChevronUp, Calendar as CalendarIcon,
-  List, Target, Search, Sparkles
+  List, Target, Search, Sparkles, Upload, Loader2, LayoutTemplate, UserPlus, FilePlus, ListPlus, CheckSquare, Square, History
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -14,6 +14,24 @@ interface TimelineViewProps {
   isLoading: boolean;
   onUpdateAgenda: (agenda: MeetingAgenda) => void;
   onCreateBlankAgenda?: () => void;
+  files?: UploadedFile[];
+  onFileUpload?: (file: File) => void;
+  onRemoveFile?: (index: number) => void;
+  onGenerateAgenda?: (customInstructions: string) => void;
+  selectedTemplateId?: string;
+  onSelectTemplate?: (id: string) => void;
+  onCreateManualAgenda?: (manualData: {
+    title: string;
+    startTime: string;
+    summary: string;
+    stakeholders: Array<{ name: string; role: string; contact: string }>;
+    items: Array<{ topic: string; durationMinutes: number; description: string }>;
+  }) => void;
+  savedAgendas?: SavedAgendaItem[];
+  activeAgendaId?: string | null;
+  onSelectAgenda?: (id: string) => void;
+  onDeleteAgenda?: (id: string) => void;
+  onClearAllHistory?: () => void;
 }
 
 // Helper to calculate time
@@ -423,8 +441,26 @@ const AgendaItemRow = React.memo<AgendaItemRowProps>(({
   );
 });
 
-export const TimelineView: React.FC<TimelineViewProps> = ({ agenda, isLoading, onUpdateAgenda, onCreateBlankAgenda }) => {
+export const TimelineView: React.FC<TimelineViewProps> = ({ 
+  agenda, 
+  isLoading, 
+  onUpdateAgenda, 
+  onCreateBlankAgenda,
+  files = [],
+  onFileUpload,
+  onRemoveFile,
+  onGenerateAgenda,
+  selectedTemplateId = 'auto',
+  onSelectTemplate,
+  onCreateManualAgenda,
+  savedAgendas = [],
+  activeAgendaId = null,
+  onSelectAgenda,
+  onDeleteAgenda,
+  onClearAllHistory
+}) => {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isHistoryDropdownOpen, setIsHistoryDropdownOpen] = useState(false);
   const [meetingDate, setMeetingDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -434,6 +470,95 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ agenda, isLoading, o
     role: '',
     contact: ''
   });
+
+  // States for center planner workspace
+  const [centerPlannerMode, setCenterPlannerMode] = useState<'ai' | 'manual'>('ai');
+  const [centerInstructions, setCenterInstructions] = useState('');
+  const [centerManualTitle, setCenterManualTitle] = useState('');
+  const [centerManualStartTime, setCenterManualStartTime] = useState('09:00');
+  const [centerManualSummary, setCenterManualSummary] = useState('');
+  const [centerManualStakeholders, setCenterManualStakeholders] = useState<Array<{ name: string; role: string; contact: string }>>([]);
+  const [centerManualItems, setCenterManualItems] = useState<Array<{ topic: string; durationMinutes: number; description: string }>>([]);
+
+  const [centerNewStakeholderName, setCenterNewStakeholderName] = useState('');
+  const [centerNewStakeholderRole, setCenterNewStakeholderRole] = useState('');
+  const [centerNewTopicName, setCenterNewTopicName] = useState('');
+  const [centerNewTopicDuration, setCenterNewTopicDuration] = useState(15);
+  const [centerNewTopicDescription, setCenterNewTopicDescription] = useState('');
+  const [centerDropdownOpen, setCenterDropdownOpen] = useState(false);
+  const centerDropdownRef = useRef<HTMLDivElement>(null);
+  const historyDropdownRef = useRef<HTMLDivElement>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
+  const centerFileInputRef = useRef<HTMLInputElement>(null);
+
+  // States for inline Title and Summary editing
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
+  const [isEditingSummary, setIsEditingSummary] = useState(false);
+  const [editedSummary, setEditedSummary] = useState('');
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (centerDropdownRef.current && !centerDropdownRef.current.contains(event.target as Node)) {
+        setCenterDropdownOpen(false);
+      }
+      if (historyDropdownRef.current && !historyDropdownRef.current.contains(event.target as Node)) {
+        setIsHistoryDropdownOpen(false);
+      }
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setIsExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const triggerCenterUpload = () => {
+    centerFileInputRef.current?.click();
+  };
+
+  const handleCenterFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && onFileUpload) {
+      Array.from(e.target.files).forEach(file => onFileUpload(file));
+    }
+    if (centerFileInputRef.current) centerFileInputRef.current.value = '';
+  };
+
+  const centerSelectedTemplate = MEETING_TEMPLATES.find(t => t.id === selectedTemplateId) || MEETING_TEMPLATES[0];
+
+  const handleStartEditTitle = () => {
+    if (!agenda) return;
+    setEditedTitle(agenda.title);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveTitle = () => {
+    if (!agenda) return;
+    if (editedTitle.trim()) {
+      onUpdateAgenda({ ...agenda, title: editedTitle.trim() });
+    }
+    setIsEditingTitle(false);
+  };
+
+  const handleCancelEditTitle = () => {
+    setIsEditingTitle(false);
+  };
+
+  const handleStartEditSummary = () => {
+    if (!agenda) return;
+    setEditedSummary(agenda.summary);
+    setIsEditingSummary(true);
+  };
+
+  const handleSaveSummary = () => {
+    if (!agenda) return;
+    onUpdateAgenda({ ...agenda, summary: editedSummary.trim() });
+    setIsEditingSummary(false);
+  };
+
+  const handleCancelEditSummary = () => {
+    setIsEditingSummary(false);
+  };
 
   const handleSuggestNextItem = async () => {
     if (!agenda || isSuggesting) return;
@@ -832,23 +957,412 @@ END:VCALENDAR`;
           </div>
         </div>
       ) : !agenda ? (
-        <div className="flex-grow flex flex-col items-center justify-center p-8 h-full min-h-[440px]">
-          <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-6 text-indigo-500 animate-bounce duration-1000">
-            <Calendar size={40} />
+        <div className="max-w-4xl mx-auto p-4 sm:p-8 md:p-12">
+          {/* Hidden File Picker */}
+          <input 
+            type="file" 
+            ref={centerFileInputRef} 
+            onChange={handleCenterFileChange} 
+            className="hidden" 
+            multiple
+            accept=".pdf,.txt,.md,.json,.csv,.jpg,.png,.jpeg"
+          />
+
+          {/* Header */}
+          <div className="text-center mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="inline-flex items-center gap-2 bg-indigo-50 border border-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold mb-3">
+              <Sparkles size={12} className="text-indigo-500 animate-pulse" />
+              Central Planner Workspace
+            </div>
+            <h2 className="text-3xl md:text-4xl font-black text-slate-950 tracking-tight leading-tight">
+              Design Your Meeting Agenda
+            </h2>
+            <p className="text-slate-500 text-sm max-w-lg mx-auto mt-2 leading-relaxed">
+              Synthesize briefings using Gemini, or build a highly-detailed structured meeting timeline block-by-block.
+            </p>
           </div>
-          <h2 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">Design New Agenda</h2>
-          <p className="text-slate-500 text-sm max-w-sm text-center mb-6 leading-relaxed">
-            Upload document briefings or build a perfectly structured meeting timeline instantly.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3">
-             {onCreateBlankAgenda && (
-               <button 
-                 onClick={onCreateBlankAgenda}
-                 className="px-6 py-3 bg-slate-900 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg hover:bg-slate-800 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-               >
-                 Create Blank Agenda
-               </button>
-             )}
+
+          {/* Mode Switch Card */}
+          <div className="bg-white border border-slate-200/85 rounded-2xl shadow-sm overflow-hidden mb-6 animate-in fade-in zoom-in-95 duration-300">
+            {/* Mode switch header */}
+            <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">CHOOSE DESIGN APPROACH:</span>
+              <div className="flex p-1 bg-slate-200/60 rounded-xl w-full sm:w-auto">
+                <button
+                  onClick={() => setCenterPlannerMode('ai')}
+                  className={`flex-1 sm:flex-none px-4 py-2 min-h-[38px] rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    centerPlannerMode === 'ai' 
+                      ? 'bg-white text-indigo-600 shadow-xs' 
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Sparkles size={13} className={centerPlannerMode === 'ai' ? 'text-indigo-500 animate-pulse' : ''} />
+                  AI Co-Pilot
+                </button>
+                <button
+                  onClick={() => setCenterPlannerMode('manual')}
+                  className={`flex-1 sm:flex-none px-4 py-2 min-h-[38px] rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    centerPlannerMode === 'manual' 
+                      ? 'bg-white text-indigo-600 shadow-xs' 
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Clock size={13} className={centerPlannerMode === 'manual' ? 'text-indigo-500' : ''} />
+                  Manual Builder
+                </button>
+              </div>
+            </div>
+
+            {/* AI Setup Form */}
+            {centerPlannerMode === 'ai' ? (
+              <div className="p-6 md:p-8 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Left Column: Template and instructions */}
+                  <div className="space-y-5">
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Meeting Template</label>
+                      <div className="relative" ref={centerDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setCenterDropdownOpen(!centerDropdownOpen)}
+                          className="w-full flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-sm text-slate-700 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-left cursor-pointer"
+                        >
+                          <span className="truncate">{centerSelectedTemplate.name}</span>
+                          <ChevronDown size={16} className={`text-slate-400 transition-transform shrink-0 ml-2 ${centerDropdownOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {centerDropdownOpen && (
+                          <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-100 rounded-xl shadow-xl z-50 py-1.5 max-h-60 overflow-y-auto">
+                            {MEETING_TEMPLATES.map(t => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => {
+                                  if (onSelectTemplate) onSelectTemplate(t.id);
+                                  setCenterDropdownOpen(false);
+                                }}
+                                className={`flex items-center justify-between w-full px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors text-left cursor-pointer ${t.id === selectedTemplateId ? 'text-indigo-600 bg-indigo-50/30' : ''}`}
+                              >
+                                <span>{t.name}</span>
+                                {t.id === selectedTemplateId && <Check size={14} className="text-indigo-600" />}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <p className="mt-2 text-xs text-slate-400">
+                        {centerSelectedTemplate.description}
+                        {selectedTemplateId !== 'auto' && <span className="block text-indigo-500 font-medium mt-0.5">Expected flow: {centerSelectedTemplate.structure}</span>}
+                      </p>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Custom Instructions & Points</label>
+                        <span className="text-[10px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full">AI Steer Notes</span>
+                      </div>
+                      <textarea
+                        value={centerInstructions}
+                        onChange={e => setCenterInstructions(e.target.value)}
+                        rows={4}
+                        className="w-full text-xs text-slate-700 border border-slate-200 rounded-xl p-3 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 bg-slate-50/50 hover:bg-slate-50 focus:bg-white transition-all resize-none leading-relaxed"
+                        placeholder="💡 Provide direct prompts, goals, core focal areas, or schedule details here. E.g., 'Dedicate at least 15 minutes to marketing plans. Ensure Kennedy Mtega is marked as host. Budget reviews should occur first.'"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Right Column: Source Documents Dropzone */}
+                  <div className="space-y-4">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Briefings & Source Documents</label>
+                    <div 
+                      onClick={triggerCenterUpload}
+                      className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer bg-slate-50/30 hover:bg-slate-50 transition-all min-h-[160px] group animate-pulse hover:animate-none"
+                    >
+                      <div className="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center mb-3 text-indigo-600 group-hover:scale-110 transition-transform">
+                        <Upload size={16} />
+                      </div>
+                      <p className="text-xs font-bold text-slate-700 mb-1">Click or Drag Files Here</p>
+                      <p className="text-[11px] text-slate-400">Supports PDF, TXT, images, and meeting notes</p>
+                    </div>
+
+                    {files.length > 0 && (
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {files.map((file, idx) => (
+                          <div key={idx} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl p-2.5 animate-in slide-in-from-top-1">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <FileTextIcon size={14} className="text-indigo-500 shrink-0" />
+                              <span className="text-xs font-bold text-slate-800 truncate max-w-[200px]" title={file.name}>{file.name}</span>
+                              <span className="text-[10px] text-slate-400">({(file.size / 1024).toFixed(0)} KB)</span>
+                            </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); if (onRemoveFile) onRemoveFile(idx); }}
+                              className="text-slate-400 hover:text-red-500 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-3 items-center justify-between">
+                  <p className="text-xs text-slate-400 text-center sm:text-left">
+                    💡 Gemini will combine your uploaded briefs and instructions into an agenda instantly.
+                  </p>
+                  <button
+                    onClick={() => onGenerateAgenda && onGenerateAgenda(centerInstructions)}
+                    disabled={isLoading || (files.length === 0 && selectedTemplateId === 'auto' && !centerInstructions.trim())}
+                    className="w-full sm:w-auto min-h-[46px] px-6 bg-slate-900 hover:bg-indigo-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none cursor-pointer"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Analyzing files...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14} className="text-amber-300" />
+                        Generate Guided Agenda
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Manual Builder Form */
+              <div className="p-6 md:p-8 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Left Column: Core Fields */}
+                  <div className="md:col-span-2 space-y-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Meeting Title *</label>
+                      <input
+                        type="text"
+                        value={centerManualTitle}
+                        onChange={e => setCenterManualTitle(e.target.value)}
+                        className="w-full text-sm font-semibold border border-slate-200 rounded-xl px-3.5 h-11 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 bg-slate-50/50 hover:bg-slate-50 focus:bg-white transition-all"
+                        placeholder="e.g., Marketing Strategy & Campaign Alignment"
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Start Time</label>
+                        <input
+                          type="time"
+                          value={centerManualStartTime}
+                          onChange={e => setCenterManualStartTime(e.target.value)}
+                          className="w-full text-sm font-semibold border border-slate-200 rounded-xl px-3.5 h-11 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 bg-slate-50/50 hover:bg-slate-50 focus:bg-white transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Draft Topics Count</label>
+                        <div className="h-11 border border-slate-200/80 bg-slate-50 text-slate-500 rounded-xl px-3.5 flex items-center font-bold text-xs uppercase tracking-wide">
+                          {centerManualItems.length} Blocks Configured
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Meeting Brief / Objective</label>
+                      <textarea
+                        value={centerManualSummary}
+                        onChange={e => setCenterManualSummary(e.target.value)}
+                        rows={3}
+                        className="w-full text-xs text-slate-600 border border-slate-200 rounded-xl p-3 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 bg-slate-50/50 hover:bg-slate-50 focus:bg-white transition-all resize-none"
+                        placeholder="Provide a quick summary of what this meeting intends to resolve..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Right Column: Stakeholders inline list */}
+                  <div className="bg-slate-50/50 border border-slate-200/60 rounded-2xl p-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-slate-500 mb-3 border-b border-slate-100 pb-2">
+                        <UserPlus size={14} />
+                        <h3 className="text-xs font-bold uppercase tracking-wider">Stakeholders ({centerManualStakeholders.length})</h3>
+                      </div>
+
+                      {centerManualStakeholders.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 text-center py-6">No stakeholders added. Add attendees below to assign them topic spots.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto mb-4 bg-white p-2 rounded-xl border border-slate-100">
+                          {centerManualStakeholders.map((sh, idx) => (
+                            <div key={idx} className="flex items-center gap-1 pl-2.5 pr-1 py-1 bg-slate-50 border border-slate-200 rounded-full text-[10px] font-bold text-slate-700">
+                              <span>{sh.name}</span>
+                              <span className="text-slate-400 text-[9px] font-medium">({sh.role})</span>
+                              <button 
+                                onClick={() => setCenterManualStakeholders(prev => prev.filter((_, i) => i !== idx))}
+                                className="text-slate-400 hover:text-red-500 hover:bg-slate-200 rounded-full w-4 h-4 flex items-center justify-center cursor-pointer"
+                              >
+                                <X size={9} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 mt-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={centerNewStakeholderName}
+                          onChange={e => setCenterNewStakeholderName(e.target.value)}
+                          className="text-xs border border-slate-200 bg-white rounded-xl px-2.5 h-9 focus:outline-none"
+                          placeholder="Name (e.g., Alisa)"
+                        />
+                        <input
+                          type="text"
+                          value={centerNewStakeholderRole}
+                          onChange={e => setCenterNewStakeholderRole(e.target.value)}
+                          className="text-xs border border-slate-200 bg-white rounded-xl px-2.5 h-9 focus:outline-none"
+                          placeholder="Role (e.g., PM)"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!centerNewStakeholderName.trim()) return;
+                          setCenterManualStakeholders(prev => [...prev, {
+                            name: centerNewStakeholderName.trim(),
+                            role: centerNewStakeholderRole.trim() || 'Contributor',
+                            contact: ''
+                          }]);
+                          setCenterNewStakeholderName('');
+                          setCenterNewStakeholderRole('');
+                        }}
+                        className="w-full bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl h-9 flex items-center justify-center font-bold text-xs cursor-pointer select-none transition-colors"
+                      >
+                        Add Stakeholder
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Topics Builder Block */}
+                <div className="border-t border-slate-100 pt-5">
+                  <div className="flex items-center gap-1.5 text-slate-500 mb-3">
+                    <ListPlus size={14} />
+                    <h3 className="text-xs font-bold uppercase tracking-wider">Configure Meeting Topics ({centerManualItems.length})</h3>
+                  </div>
+
+                  {centerManualItems.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 max-h-48 overflow-y-auto p-1 bg-slate-50 border border-slate-100 rounded-2xl">
+                      {centerManualItems.map((it, idx) => (
+                        <div key={idx} className="bg-white border border-slate-200/60 rounded-xl p-3 flex items-start gap-3 justify-between shadow-xs">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{it.durationMinutes}m</span>
+                              <h4 className="text-xs font-bold text-slate-800 truncate">{it.topic}</h4>
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-1 line-clamp-1">{it.description}</p>
+                          </div>
+                          <button 
+                            onClick={() => setCenterManualItems(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-slate-400 hover:text-red-500 hover:bg-slate-100 rounded-lg w-7 h-7 flex items-center justify-center cursor-pointer shrink-0"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4 bg-slate-50/50 rounded-2xl border border-slate-200/50">
+                    <div className="space-y-1 md:col-span-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Topic Title *</label>
+                      <input
+                        type="text"
+                        value={centerNewTopicName}
+                        onChange={e => setCenterNewTopicName(e.target.value)}
+                        className="w-full text-xs border border-slate-200 rounded-xl px-3 bg-white h-9 focus:outline-none"
+                        placeholder="e.g., Introduce New Platform Features"
+                      />
+                    </div>
+                    
+                    <div className="space-y-1 md:col-span-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Duration & Brief summary</label>
+                      <div className="flex gap-2">
+                        <div className="flex items-center border border-slate-200 rounded-xl bg-white px-2.5 h-9 w-20 shrink-0">
+                          <input
+                            type="number"
+                            min="1"
+                            value={centerNewTopicDuration}
+                            onChange={e => setCenterNewTopicDuration(Number(e.target.value) || 15)}
+                            className="w-8 text-xs font-bold text-slate-700 text-center focus:outline-none bg-transparent"
+                          />
+                          <span className="text-[9px] text-slate-400 font-bold ml-0.5">min</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={centerNewTopicDescription}
+                          onChange={e => setCenterNewTopicDescription(e.target.value)}
+                          className="flex-grow text-xs border border-slate-200 rounded-xl px-3 bg-white h-9 focus:outline-none"
+                          placeholder="e.g., Showcase the dynamic calendar widget"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!centerNewTopicName.trim()) return;
+                          setCenterManualItems(prev => [...prev, {
+                            topic: centerNewTopicName.trim(),
+                            durationMinutes: Number(centerNewTopicDuration) || 15,
+                            description: centerNewTopicDescription.trim() || 'General discussion block.'
+                          }]);
+                          setCenterNewTopicName('');
+                          setCenterNewTopicDuration(15);
+                          setCenterNewTopicDescription('');
+                        }}
+                        className="w-full bg-slate-900 hover:bg-indigo-600 text-white rounded-xl h-9 flex items-center justify-center font-bold text-xs cursor-pointer select-none transition-colors"
+                      >
+                        Add Topic Block
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-3 items-center justify-between">
+                  {onCreateBlankAgenda && (
+                    <button
+                      onClick={onCreateBlankAgenda}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50/50 hover:bg-indigo-50 px-4 py-2 rounded-xl transition-all h-11 flex items-center justify-center cursor-pointer"
+                    >
+                      💡 Skip & Start with Blank Agenda
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (!centerManualTitle.trim()) {
+                        alert("Please provide a Meeting Title.");
+                        return;
+                      }
+                      if (onCreateManualAgenda) {
+                        onCreateManualAgenda({
+                          title: centerManualTitle.trim(),
+                          startTime: centerManualStartTime || '09:00',
+                          summary: centerManualSummary.trim() || 'Manual meeting session.',
+                          stakeholders: centerManualStakeholders,
+                          items: centerManualItems
+                        });
+                      }
+                    }}
+                    disabled={!centerManualTitle.trim()}
+                    className="w-full sm:w-auto min-h-[46px] px-6 bg-slate-900 hover:bg-indigo-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none cursor-pointer"
+                  >
+                    <Plus size={14} />
+                    <span>Build Custom Session</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -861,68 +1375,98 @@ END:VCALENDAR`;
             </div>
           )}
 
+
+
           {/* Header Section */}
           <div className="flex flex-col xl:flex-row gap-4 sm:gap-6 md:gap-8 mb-6 sm:mb-10">
              <div className="flex-1 min-w-0">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                   <div className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-900 text-white text-xs font-semibold rounded-full shadow-md shadow-slate-900/20 w-fit shrink-0">
-                      <Clock size={12} />
-                      {totalDuration} Minutes Total
+                <div className="flex flex-row items-center justify-between gap-2.5 mb-6 w-full">
+                   {/* Left side: Time & Search */}
+                   <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+                      <div className="inline-flex items-center justify-center gap-1.5 px-3 h-11 bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm shrink-0" title={`${totalDuration} Minutes Total`}>
+                         <Clock size={13} />
+                         <span>{totalDuration}m</span>
+                      </div>
+                      
+                      {/* Search Bar - Touch Optimized */}
+                      <div className="relative group flex-1 max-w-xs min-w-[100px]">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
+                          <input 
+                             type="text"
+                             value={searchQuery}
+                             onChange={(e) => setSearchQuery(e.target.value)}
+                             placeholder="Filter..."
+                             className="w-full h-11 transition-all pl-9 pr-3 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 shadow-sm"
+                          />
+                          {searchQuery && (
+                             <button onClick={() => setSearchQuery('')} className="absolute right-0 top-0 w-11 h-11 flex items-center justify-center text-slate-300 hover:text-slate-500 rounded-r-xl" title="Clear filter">
+                                 <X size={12} />
+                             </button>
+                          )}
+                      </div>
                    </div>
                    
-                   <div className="flex items-center gap-2 w-full sm:w-auto">
-                       {/* Search Bar - Touch Optimized */}
-                       <div className="relative group flex-grow sm:flex-initial">
-                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
-                           <input 
-                              type="text"
-                              value={searchQuery}
-                              onChange={(e) => setSearchQuery(e.target.value)}
-                              placeholder="Filter topics..."
-                              className="w-full sm:w-36 md:w-48 sm:focus:w-52 md:focus:w-60 h-11 transition-all pl-9 pr-8 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 shadow-sm"
-                           />
-                           {searchQuery && (
-                              <button onClick={() => setSearchQuery('')} className="absolute right-0 top-0 w-11 h-11 flex items-center justify-center text-slate-300 hover:text-slate-500 rounded-r-xl" title="Clear filter">
-                                  <X size={12} />
-                              </button>
-                           )}
-                       </div>
-   
-                       {/* Export PDF Quick Action */}
-                       <button 
-                          onClick={handleExportPDF}
-                          className="flex items-center gap-2 px-3.5 h-11 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-xl text-sm font-semibold transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
-                          title="Export and print agenda as beautifully formatted PDF"
-                       >
-                          <Download size={15} />
-                          <span className="hidden sm:inline">Export PDF</span>
-                       </button>
+                   {/* Right side: Actions */}
+                   <div className="flex items-center gap-2 md:gap-3 shrink-0">
+                       {onCreateBlankAgenda && (
+                          <button 
+                             onClick={onCreateBlankAgenda}
+                             className="flex items-center justify-center gap-2 px-3 h-11 bg-white border border-slate-200 hover:border-indigo-200 hover:text-indigo-600 rounded-xl text-sm font-semibold text-slate-700 transition-colors shadow-sm cursor-pointer shrink-0"
+                             title="Create new meeting agenda"
+                          >
+                             <Plus size={15} />
+                             <span className="hidden sm:inline">New Agenda</span>
+                          </button>
+                       )}
 
-                       {/* Export Dropdown - 44px high targets */}
-                       <div className="relative">
+                       {/* Consolidated Export & Share Dropdown - 44px high targets to prevent overlapping */}
+                       <div className="relative shrink-0" ref={exportDropdownRef}>
                           <button 
                              onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                             className="flex items-center gap-2 px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm cursor-pointer"
+                             className="w-11 h-11 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer shrink-0"
+                             title="Export, print, or share meeting agenda"
                           >
                              <Share2 size={16} />
-                             <span className="hidden min-[360px]:inline">Share</span>
-                             <ChevronDown size={14} className={`transition-transform ${isExportMenuOpen ? 'rotate-180' : ''}`} />
                           </button>
                           
                           {isExportMenuOpen && (
                              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 animate-in fade-in zoom-in-95 duration-200">
-                                <button onClick={handleExportPDF} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer">
+                                <button 
+                                   onClick={() => {
+                                      handleExportPDF();
+                                      setIsExportMenuOpen(false);
+                                   }} 
+                                   className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer"
+                                >
                                    <FileTextIcon size={16} className="text-red-500" /> Export as PDF
                                 </button>
-                                <button onClick={handleExportiCal} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer">
+                                <button 
+                                   onClick={() => {
+                                      handleExportiCal();
+                                      setIsExportMenuOpen(false);
+                                    }} 
+                                   className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer"
+                                >
                                    <CalendarIcon size={16} className="text-blue-500" /> Export as iCal
                                 </button>
                                 <div className="h-px bg-slate-100 my-1"></div>
-                                <button onClick={handleShareEmail} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer">
-                                   <Mail size={16} className="text-slate-500" /> Share via Email
+                                <button 
+                                   onClick={() => {
+                                      handleShareEmail();
+                                      setIsExportMenuOpen(false);
+                                   }} 
+                                   className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer"
+                                >
+                                   <Mail size={16} className="text-indigo-500" /> Share via Email
                                 </button>
-                                <button onClick={handleCopyLink} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer">
-                                   <LinkIcon size={16} className="text-slate-500" /> Copy Details
+                                <button 
+                                   onClick={() => {
+                                      handleCopyLink();
+                                      setIsExportMenuOpen(false);
+                                   }} 
+                                   className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-3 min-h-[44px] cursor-pointer"
+                                 >
+                                   <LinkIcon size={16} className="text-teal-500" /> Copy Details
                                 </button>
                              </div>
                           )}
@@ -930,12 +1474,89 @@ END:VCALENDAR`;
                     </div>
                 </div>
                 
-                <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight leading-tight mb-3">
-                  {agenda.title}
-                </h1>
-                <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-sm text-slate-600 text-sm leading-relaxed mb-4">
-                   {agenda.summary}
-                </div>
+                {isEditingTitle ? (
+                  <div className="flex items-center gap-2 mb-3">
+                    <input
+                      type="text"
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveTitle();
+                        if (e.key === 'Escape') handleCancelEditTitle();
+                      }}
+                      className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight leading-tight w-full bg-slate-50 border border-indigo-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSaveTitle}
+                      className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors shrink-0 cursor-pointer"
+                      title="Save Title"
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button
+                      onClick={handleCancelEditTitle}
+                      className="p-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors shrink-0 cursor-pointer"
+                      title="Cancel"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <h1 
+                    onClick={handleStartEditTitle}
+                    className="group relative text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight leading-tight mb-3 cursor-pointer hover:bg-slate-100/60 rounded-lg p-1 transition-all -ml-1 flex items-center justify-between gap-2"
+                  >
+                    <span>{agenda.title}</span>
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 p-1 hover:text-indigo-600 rounded-md bg-white border border-slate-100 shadow-sm shrink-0">
+                      <Edit2 size={14} />
+                    </span>
+                  </h1>
+                )}
+                
+                {isEditingSummary ? (
+                  <div className="flex flex-col gap-2 mb-4">
+                    <textarea
+                      value={editedSummary}
+                      onChange={(e) => setEditedSummary(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') handleCancelEditSummary();
+                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                          handleSaveSummary();
+                        }
+                      }}
+                      rows={3}
+                      className="w-full text-slate-600 text-sm leading-relaxed bg-slate-50 border border-indigo-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-y"
+                      autoFocus
+                      placeholder="Enter a brief summary of the meeting objective..."
+                    />
+                    <div className="flex justify-end gap-2">
+                      <span className="text-[10px] text-slate-400 self-center mr-auto">Press Ctrl+Enter to save</span>
+                      <button
+                        onClick={handleCancelEditSummary}
+                        className="px-3.5 h-9 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl text-xs font-bold transition-colors shrink-0 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveSummary}
+                        className="px-3.5 h-9 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-xl text-xs font-bold transition-colors shrink-0 cursor-pointer"
+                      >
+                        Save Brief
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div 
+                    onClick={handleStartEditSummary}
+                    className="group relative bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-sm text-slate-600 text-sm leading-relaxed mb-4 cursor-pointer hover:bg-slate-50/60 transition-all flex items-start justify-between gap-4"
+                  >
+                    <span className="flex-1 whitespace-pre-wrap">{agenda.summary || <em className="text-slate-400">Click to add meeting brief / objective...</em>}</span>
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 p-1 hover:text-indigo-600 rounded-md bg-white border border-slate-100 shadow-sm shrink-0">
+                      <Edit2 size={13} />
+                    </span>
+                  </div>
+                )}
                 <div className="flex flex-col min-[420px]:flex-row items-stretch min-[420px]:items-center gap-2.5 sm:gap-3">
                    <div className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200/60 px-3.5 py-2 rounded-xl border border-slate-200 min-h-[44px] transition-all flex-1 min-[420px]:flex-initial">
                       <span className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1.5 shrink-0 select-none">

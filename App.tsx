@@ -1,37 +1,87 @@
-import React, { useState } from 'react';
-import { Sidebar } from './components/Sidebar';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { TimelineView } from './components/TimelineView';
 import { LandingPage } from './components/LandingPage';
 import { TemplatesExplorer } from './components/TemplatesExplorer';
 import { AgendaHistory } from './components/AgendaHistory';
 import { AgendaAnalytics } from './components/AgendaAnalytics';
 import { generateAgenda } from './services/geminiService';
-import { MeetingAgenda, UploadedFile } from './types';
+import { MeetingAgenda, UploadedFile, SavedAgendaItem } from './types';
 import { 
   Sliders, Calendar, Sparkles, PanelLeftOpen, ChevronRight,
-  CalendarPlus, Clock, History, BarChart3, LayoutTemplate,
-  CheckCircle, CheckSquare, Square, Menu, X, ArrowRight, Play, Check 
+  Clock, History, BarChart3, LayoutTemplate,
+  CheckCircle, CheckSquare, Square, Menu, X, ArrowRight, Play, Check, LogOut
 } from 'lucide-react';
-
-interface SavedAgendaItem {
-  id: string;
-  agenda: MeetingAgenda;
-  timestamp: Date;
-  templateId: string;
-  files: UploadedFile[];
-}
+import { auth } from './services/firebase';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { AuthPage } from './components/AuthPage';
+import { saveAgendaToDb, deleteAgendaFromDb, loadUserAgendas } from './services/agendaDb';
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [savedAgendas, setSavedAgendas] = useState<SavedAgendaItem[]>([]);
   const [selectedAgendaId, setSelectedAgendaId] = useState<string | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'create' | 'active' | 'history' | 'templates' | 'analytics'>('create');
-  const [showLanding, setShowLanding] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<'active' | 'history' | 'templates' | 'analytics'>('history');
+  const [showLanding, setShowLanding] = useState(false);
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState('auto');
   const [activeTab, setActiveTab] = useState<'setup' | 'agenda'>('setup');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+
+  // Monitor Auth state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsLoadingUser(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sync agendas from Firestore when user logs in
+  useEffect(() => {
+    if (!user) {
+      setSavedAgendas([]);
+      setSelectedAgendaId(null);
+      return;
+    }
+
+    const fetchAgendas = async () => {
+      try {
+        const loaded = await loadUserAgendas(user.uid);
+        setSavedAgendas(loaded);
+        if (loaded.length > 0) {
+          setSelectedAgendaId(loaded[0].id);
+        }
+        
+        // Populate local completed items from Firestore state
+        const nextCompleted: Record<string, boolean> = {};
+        loaded.forEach(item => {
+          if (item.completedItemIds) {
+            item.completedItemIds.forEach(itemId => {
+              nextCompleted[`${item.id}_${itemId}`] = true;
+            });
+          }
+        });
+        setCompletedItems(nextCompleted);
+      } catch (err) {
+        console.error("Error loading user agendas from Firestore:", err);
+      }
+    };
+
+    fetchAgendas();
+  }, [user]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   
   // Completed items per agenda: record map [agendaId_itemId] -> boolean
   const [completedItems, setCompletedItems] = useState<Record<string, boolean>>({});
@@ -42,14 +92,16 @@ export default function App() {
 
   const handleGetStartedFromLanding = () => {
     setShowLanding(false);
-    setSidebarTab('create');
+    setSelectedAgendaId(null);
+    setSidebarTab('history');
     setActiveTab('setup');
   };
 
   const handleLoadPresetFromLanding = (templateId: string) => {
     setSelectedTemplateId(templateId);
     setShowLanding(false);
-    setSidebarTab('create');
+    setSelectedAgendaId(null);
+    setSidebarTab('history');
     setActiveTab('setup');
   };
 
@@ -68,9 +120,9 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const handleGenerateAgenda = async () => {
+  const handleGenerateAgenda = async (customInstructions: string = "") => {
     if (files.length === 0 && selectedTemplateId === 'auto') return;
-    if (isProcessing) return;
+    if (isProcessing || !user) return;
     
     setIsProcessing(true);
     setActiveTab('agenda');
@@ -78,16 +130,19 @@ export default function App() {
     
     try {
       // Generate Agenda
-      const generatedAgenda = await generateAgenda(files, selectedTemplateId);
+      const generatedAgenda = await generateAgenda(files, selectedTemplateId, customInstructions);
       const newId = 'session_' + Date.now();
       const newItem: SavedAgendaItem = {
         id: newId,
+        userId: user.uid,
         agenda: generatedAgenda,
         timestamp: new Date(),
         templateId: selectedTemplateId,
-        files: [...files]
+        files: [...files],
+        completedItemIds: []
       };
       
+      await saveAgendaToDb(newItem);
       setSavedAgendas(prev => [newItem, ...prev]);
       setSelectedAgendaId(newId);
       
@@ -95,7 +150,65 @@ export default function App() {
       console.error("Error generating agenda:", error);
       alert(error.message || "Failed to generate agenda. Please check inputs or verify settings key.");
       setActiveTab('setup');
-      setSidebarTab('create');
+      setSidebarTab('history');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCreateManualAgenda = async (manualData: {
+    title: string;
+    startTime: string;
+    summary: string;
+    stakeholders: Array<{ name: string; role: string; contact: string }>;
+    items: Array<{ topic: string; durationMinutes: number; description: string }>;
+  }) => {
+    if (!user) return;
+    setIsProcessing(true);
+    setActiveTab('agenda');
+    setSidebarTab('active');
+    
+    try {
+      const newId = 'session_' + Date.now();
+      const newAgenda: MeetingAgenda = {
+        title: manualData.title || "Custom Manual Meeting",
+        summary: manualData.summary || "Manually planned meeting agenda.",
+        startTime: manualData.startTime || "09:00",
+        stakeholders: manualData.stakeholders.map(s => ({
+          id: 'sk_' + Math.random().toString(36).substring(2, 9),
+          name: s.name,
+          role: s.role,
+          contact: s.contact || ''
+        })),
+        items: manualData.items.map(it => ({
+          id: 'it_' + Math.random().toString(36).substring(2, 9),
+          topic: it.topic,
+          durationMinutes: it.durationMinutes,
+          description: it.description,
+          speakerIds: [],
+          keyPoints: [],
+          expectedOutcome: ''
+        }))
+      };
+      
+      const newItem: SavedAgendaItem = {
+        id: newId,
+        userId: user.uid,
+        agenda: newAgenda,
+        timestamp: new Date(),
+        templateId: 'custom',
+        files: [],
+        completedItemIds: []
+      };
+      
+      await saveAgendaToDb(newItem);
+      setSavedAgendas(prev => [newItem, ...prev]);
+      setSelectedAgendaId(newId);
+    } catch (err: any) {
+      console.error("Error creating manual agenda:", err);
+      alert("Failed to initialize manual agenda.");
+      setActiveTab('setup');
+      setSidebarTab('history');
     } finally {
       setIsProcessing(false);
     }
@@ -105,18 +218,23 @@ export default function App() {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
   
-  const handleUpdateAgenda = (updatedAgenda: MeetingAgenda) => {
-    if (selectedAgendaId) {
-      setSavedAgendas(prev => prev.map(item => {
-        if (item.id === selectedAgendaId) {
-          return { ...item, agenda: updatedAgenda };
-        }
-        return item;
-      }));
+  const handleUpdateAgenda = async (updatedAgenda: MeetingAgenda) => {
+    if (selectedAgendaId && user) {
+      const active = savedAgendas.find(item => item.id === selectedAgendaId);
+      if (active) {
+        const updatedItem = { ...active, agenda: updatedAgenda };
+        setSavedAgendas(prev => prev.map(item => {
+          if (item.id === selectedAgendaId) {
+            return updatedItem;
+          }
+          return item;
+        }));
+        await saveAgendaToDb(updatedItem);
+      }
     }
   };
 
-  const handleCreateBlankAgenda = () => {
+  const handleCreateBlankAgenda = async () => {
     const newId = 'session_' + Date.now();
     const newAgenda: MeetingAgenda = {
       title: "New Meeting Agenda",
@@ -139,11 +257,16 @@ export default function App() {
     };
     const newItem: SavedAgendaItem = {
       id: newId,
+      userId: user?.uid || '',
       agenda: newAgenda,
       timestamp: new Date(),
       templateId: 'custom',
-      files: []
+      files: [],
+      completedItemIds: []
     };
+    if (user) {
+      await saveAgendaToDb(newItem);
+    }
     setSavedAgendas(prev => [newItem, ...prev]);
     setSelectedAgendaId(newId);
     setActiveTab('agenda');
@@ -159,7 +282,10 @@ export default function App() {
     }
   };
 
-  const handleDeleteAgenda = (id: string) => {
+  const handleDeleteAgenda = async (id: string) => {
+    if (user) {
+      await deleteAgendaFromDb(id);
+    }
     const updated = savedAgendas.filter(item => item.id !== id);
     setSavedAgendas(updated);
     if (selectedAgendaId === id) {
@@ -167,25 +293,51 @@ export default function App() {
         setSelectedAgendaId(updated[0].id);
       } else {
         setSelectedAgendaId(null);
-        setSidebarTab('create');
+        setSidebarTab('history');
         setActiveTab('setup');
       }
     }
   };
 
-  const handleLoadTemplateInPlanner = (id: string) => {
-    setSelectedTemplateId(id);
-    setSidebarTab('create');
+  const handleClearAllHistory = async () => {
+    if (user) {
+      for (const item of savedAgendas) {
+        await deleteAgendaFromDb(item.id);
+      }
+    }
+    setSavedAgendas([]);
+    setSelectedAgendaId(null);
+    setSidebarTab('history');
     setActiveTab('setup');
   };
 
-  const toggleItemComplete = (itemId: string) => {
-    if (!selectedAgendaId) return;
+  const handleLoadTemplateInPlanner = (id: string) => {
+    setSelectedTemplateId(id);
+    setSidebarTab('history');
+    setActiveTab('setup');
+  };
+
+  const toggleItemComplete = async (itemId: string) => {
+    if (!selectedAgendaId || !user) return;
     const key = `${selectedAgendaId}_${itemId}`;
+    const nextCompleted = !completedItems[key];
+    
     setCompletedItems(prev => ({
       ...prev,
-      [key]: !prev[key]
+      [key]: nextCompleted
     }));
+
+    const active = savedAgendas.find(item => item.id === selectedAgendaId);
+    if (active) {
+      const currentCompletedIds = active.completedItemIds || [];
+      const updatedCompletedIds = nextCompleted
+        ? [...currentCompletedIds, itemId]
+        : currentCompletedIds.filter(id => id !== itemId);
+        
+      const updatedItem = { ...active, completedItemIds: updatedCompletedIds };
+      setSavedAgendas(prev => prev.map(item => item.id === selectedAgendaId ? updatedItem : item));
+      await saveAgendaToDb(updatedItem);
+    }
   };
 
   // Helper to scroll to specific agenda item
@@ -221,6 +373,25 @@ export default function App() {
   const activeItems = agenda ? agenda.items : [];
   const completedCount = activeItems.filter(item => !!completedItems[`${selectedAgendaId}_${item.id}`]).length;
   const progressPct = activeItems.length > 0 ? Math.round((completedCount / activeItems.length) * 100) : 0;
+  const isSidebarOpen = isMobile ? (activeTab === 'setup') : !isSidebarCollapsed;
+
+  if (isLoadingUser) {
+    return (
+      <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-slate-950 text-white relative font-sans">
+        {/* Dynamic ambient backgrounds */}
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-900/20 blur-[120px] pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-violet-900/20 blur-[120px] pointer-events-none"></div>
+        <div className="relative bg-white/[0.02] backdrop-blur-md border border-white/[0.05] shadow-2xl rounded-3xl p-8 flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>
+          <span className="text-xs font-bold uppercase tracking-widest text-indigo-300">Initializing Workspace</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage onAuthSuccess={() => {}} />;
+  }
 
   if (showLanding) {
     return (
@@ -242,40 +413,49 @@ export default function App() {
             </div>
             <span className="text-sm font-bold tracking-tight">Agenda Planner</span>
           </div>
-          <div className="flex gap-1 p-0.5 bg-slate-800 rounded-lg">
-            <button
-              onClick={() => setShowLanding(true)}
-              className="px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all text-slate-400 hover:text-white"
-              title="Return to Landing Page"
-            >
-              <LayoutTemplate size={11} />
-              Home
-            </button>
-            <button
-              onClick={() => setActiveTab('setup')}
-              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
-                activeTab === 'setup'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Sliders size={11} />
-              Setup
-            </button>
-            <button
-              onClick={() => setActiveTab('agenda')}
-              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all relative ${
-                activeTab === 'agenda'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Sparkles size={11} className={isProcessing ? "animate-spin text-indigo-300" : "text-amber-300"} />
-              Agenda
-              {agenda && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 border border-slate-900 rounded-full"></span>
-              )}
-            </button>
+          
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1 p-0.5 bg-slate-800 rounded-lg">
+              <button
+                onClick={() => setActiveTab('setup')}
+                className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all ${
+                  activeTab === 'setup'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Sliders size={11} />
+                Setup
+              </button>
+              <button
+                onClick={() => setActiveTab('agenda')}
+                className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all relative ${
+                  activeTab === 'agenda'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Sparkles size={11} className={isProcessing ? "animate-spin text-indigo-300" : "text-amber-300"} />
+                Agenda
+                {agenda && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 border border-slate-900 rounded-full"></span>
+                )}
+              </button>
+            </div>
+
+            {/* Premium user identity and sign-out control */}
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+              <span className="hidden sm:inline-block text-[11px] font-semibold text-slate-400 max-w-[100px] truncate">
+                {user.displayName || user.email}
+              </span>
+              <button
+                onClick={() => signOut(auth)}
+                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all cursor-pointer"
+                title="Sign Out Workspace"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -293,18 +473,22 @@ export default function App() {
 
       {/* Main Workspace Frame container */}
       <div className="flex-1 flex flex-col md:flex-row min-h-0 min-w-0 overflow-hidden relative">
-        {/* Interactive Desktop Changeable Side Nav & Primary Sidebar wrapper */}
-      <div 
-        className={`h-full shrink-0 transition-all duration-300 ease-in-out flex border-r border-slate-200 bg-white ${
-          isSidebarCollapsed 
-            ? 'md:w-0 md:opacity-0 md:pointer-events-none md:overflow-hidden md:border-r-0' 
-            : 'md:w-[400px]'
-        } ${
-          activeTab === 'setup' ? 'flex w-full' : 'hidden md:flex'
-        }`}
-      >
-        {/* Changeable Sidebar Component viewport with Unified Top Level Navigation */}
-        <div className="flex-1 flex flex-col h-full bg-white relative overflow-hidden">
+        {/* Animated Slide & Expand Framer Motion Wrapper */}
+        <AnimatePresence initial={false}>
+          {isSidebarOpen && (
+            <motion.div
+              key="sidebar"
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ 
+                width: isMobile ? "100%" : 400, 
+                opacity: 1 
+              }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 350, damping: 35 }}
+              className="h-full shrink-0 flex border-r border-slate-200 bg-white overflow-hidden relative z-10"
+            >
+              {/* Changeable Sidebar Component viewport with Unified Top Level Navigation */}
+              <div className="w-screen md:w-[400px] flex flex-col h-full bg-white relative overflow-hidden shrink-0">
           
           {/* Master Unified Workspace Header and Navigation */}
           <div className="p-4 border-b border-slate-200 bg-slate-50/50 shrink-0 select-none">
@@ -341,20 +525,7 @@ export default function App() {
             </div>
 
             {/* Premium Integrated Segmented Icon Selector Tab Bar */}
-            <div className="grid grid-cols-5 gap-1 p-1 bg-slate-200/60 rounded-xl">
-              <button
-                onClick={() => setSidebarTab('create')}
-                className={`flex flex-col items-center justify-center py-2 min-h-[44px] rounded-lg transition-all gap-0.5 cursor-pointer ${
-                  sidebarTab === 'create' 
-                    ? 'bg-white text-indigo-600 shadow-sm font-bold' 
-                    : 'text-slate-500 hover:text-slate-950 hover:bg-slate-105-0 font-medium'
-                }`}
-                title="Planner Setup"
-              >
-                <CalendarPlus size={14} />
-                <span className="text-[9px] tracking-tight">Plan</span>
-              </button>
-
+            <div className="grid grid-cols-4 gap-1 p-1 bg-slate-200/60 rounded-xl">
               <button
                 onClick={() => {
                   if (agenda) {
@@ -439,19 +610,6 @@ export default function App() {
 
           {/* Sub-components container */}
           <div className="flex-grow flex flex-col min-h-0 bg-slate-50 overflow-hidden">
-            {sidebarTab === 'create' && (
-              <Sidebar 
-                files={files} 
-                onFileUpload={handleFileUpload} 
-                onRemoveFile={handleRemoveFile}
-                onGenerate={handleGenerateAgenda}
-                isProcessing={isProcessing}
-                selectedTemplateId={selectedTemplateId}
-                onSelectTemplate={setSelectedTemplateId}
-                onCollapse={setIsSidebarCollapsed}
-              />
-            )}
-
             {sidebarTab === 'active' && (
               <div className="flex-1 flex flex-col h-full bg-slate-50 min-w-0">
                 {agenda ? (
@@ -576,9 +734,11 @@ export default function App() {
                 onSwitchToCreate={() => { setSidebarTab('create'); setActiveTab('setup'); }}
               />
             )}
+            </div>
           </div>
-        </div>
-      </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
 
       {/* Main Agenda Timeline & Chat */}
       <main className={`flex-1 h-full min-h-0 min-w-0 relative overflow-hidden transition-all duration-300 ${activeTab === 'setup' ? 'hidden md:flex md:flex-col' : 'flex flex-col'}`}>
@@ -587,6 +747,18 @@ export default function App() {
           isLoading={isProcessing} 
           onUpdateAgenda={handleUpdateAgenda}
           onCreateBlankAgenda={handleCreateBlankAgenda}
+          files={files}
+          onFileUpload={handleFileUpload}
+          onRemoveFile={handleRemoveFile}
+          onGenerateAgenda={handleGenerateAgenda}
+          selectedTemplateId={selectedTemplateId}
+          onSelectTemplate={setSelectedTemplateId}
+          onCreateManualAgenda={handleCreateManualAgenda}
+          savedAgendas={savedAgendas}
+          activeAgendaId={selectedAgendaId}
+          onSelectAgenda={handleSelectAgenda}
+          onDeleteAgenda={handleDeleteAgenda}
+          onClearAllHistory={handleClearAllHistory}
         />
       </main>
       </div>

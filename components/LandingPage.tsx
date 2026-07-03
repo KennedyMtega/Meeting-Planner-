@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowRight, Sparkles, Clock, Sliders, Star, Play, 
   CheckCircle, Calendar, Users, Check, Zap, ChevronDown, 
@@ -17,6 +17,26 @@ export function LandingPage({ onGetStarted, onLoadPreset }: LandingPageProps) {
   const [subscribed, setSubscribed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedPopularTab, setSelectedPopularTab] = useState('Productivity');
+  const [activeSolutionIdx, setActiveSolutionIdx] = useState(0);
+  const [animateWord, setAnimateWord] = useState(true);
+
+  const solutions = [
+    { name: 'Productivity', color: 'text-indigo-600', bg: 'from-indigo-50/80 to-indigo-100/20', border: 'border-indigo-200/50', icon: '⚡' },
+    { name: 'Strategy', color: 'text-emerald-600', bg: 'from-emerald-50/80 to-emerald-100/20', border: 'border-emerald-200/50', icon: '🎯' },
+    { name: 'Sales', color: 'text-rose-600', bg: 'from-rose-50/80 to-rose-100/20', border: 'border-rose-200/50', icon: '🤝' }
+  ];
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setAnimateWord(false);
+      const timeout = setTimeout(() => {
+        setActiveSolutionIdx((prev) => (prev + 1) % solutions.length);
+        setAnimateWord(true);
+      }, 250);
+      return () => clearTimeout(timeout);
+    }, 3200);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleSubscribe = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,7 +79,7 @@ export function LandingPage({ onGetStarted, onLoadPreset }: LandingPageProps) {
   ];
 
   return (
-    <div className="min-h-screen w-full bg-[#f8fafc] text-slate-900 selection:bg-indigo-500 selection:text-white flex flex-col overflow-y-auto">
+    <div className="h-screen w-full bg-[#f8fafc] text-slate-900 selection:bg-indigo-500 selection:text-white flex flex-col overflow-y-auto no-scrollbar">
       
       {/* 1. HEADER SECTION */}
       <header className="w-full bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-100 px-4 sm:px-8 py-4 flex items-center justify-between">
@@ -223,6 +243,28 @@ export function LandingPage({ onGetStarted, onLoadPreset }: LandingPageProps) {
           </div>
         </div>
       </section>
+
+      {/* SOLUTION SPOTLIGHT PILL - GLASSMORPHIC */}
+      <div className="w-full max-w-xs sm:max-w-sm mx-auto px-4 relative z-30 -mt-8 sm:-mt-10 md:-mt-12 -mb-8 sm:-mb-10 md:-mb-12 flex justify-center">
+        <div className="relative bg-white/45 backdrop-blur-xl border border-white/85 shadow-[0_12px_40px_rgba(99,102,241,0.05)] rounded-full py-2 px-6 flex items-center justify-center gap-2 transition-all duration-300 overflow-hidden group hover:shadow-[0_16px_48px_rgba(99,102,241,0.08)] hover:border-white/100 min-w-[180px]">
+          
+          {/* Subtle colored glow blobs inside the pill */}
+          <div className="absolute top-0 left-1/4 w-16 h-16 bg-indigo-200/20 rounded-full filter blur-lg pointer-events-none"></div>
+          <div className="absolute bottom-0 right-1/4 w-16 h-16 bg-emerald-200/20 rounded-full filter blur-lg pointer-events-none"></div>
+
+          {/* Centered dynamic rotating text section */}
+          <div className="flex items-center justify-center min-h-[30px] select-none">
+            <div className={`transition-all duration-300 transform flex items-center gap-2 ${
+              animateWord ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-2'
+            }`}>
+              <span className="text-base shrink-0">{solutions[activeSolutionIdx].icon}</span>
+              <span className={`text-xs sm:text-sm font-extrabold tracking-widest uppercase ${solutions[activeSolutionIdx].color}`}>
+                {solutions[activeSolutionIdx].name}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* 3. PROVEN FRAMEWORKS (Top Destinations equivalent) */}
       <section id="templates" className="bg-white py-16 md:py-24 border-y border-slate-100 select-none">

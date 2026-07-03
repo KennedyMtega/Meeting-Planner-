@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "SavedAgendaItem": {
+      "title": "SavedAgendaItem",
+      "description": "A saved meeting agenda session with associated metadata and files.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the saved agenda session." },
+        "userId": { "type": "string", "description": "UID of the owner user." },
+        "templateId": { "type": "string", "description": "The ID of the template used to generate this agenda." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server creation timestamp." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server modification timestamp." },
+        "agenda": {
+          "type": "object",
+          "description": "The detailed agenda content including stakeholders and agenda items."
+        },
+        "files": {
+          "type": "array",
+          "description": "List of associated files uploaded for generation."
+        },
+        "completedItemIds": {
+          "type": "array",
+          "description": "List of item IDs within this agenda that are completed."
+        }
+      },
+      "required": ["id", "userId", "agenda", "templateId"]
+    }
+  },
+  "firestore": {
+    "/agendas/{agendaId}": {
+      "schema": "SavedAgendaItem",
+      "description": "Collection of saved agendas belonging to users."
+    }
+  }
+}

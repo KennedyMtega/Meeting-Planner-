@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { History, Calendar, Trash2, Clock, Users, CheckCircle, Eye, Sparkles } from 'lucide-react';
 import { MeetingAgenda } from '../types';
 
@@ -17,6 +17,8 @@ export const AgendaHistory: React.FC<AgendaHistoryProps> = ({
   onDeleteAgenda,
   onSwitchToCreate
 }) => {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 min-w-0">
       <div className="flex-1 overflow-y-auto p-4">
@@ -52,21 +54,54 @@ export const AgendaHistory: React.FC<AgendaHistoryProps> = ({
                       : 'border-slate-200 hover:border-slate-300'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-2 mb-2 pr-6">
-                    <h3 className="font-bold text-sm text-slate-800 line-clamp-1 group-hover:text-indigo-600 transition-colors">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <h3 className="font-bold text-sm text-slate-800 line-clamp-1 group-hover:text-indigo-600 transition-colors flex-1 pr-1">
                       {agenda.title}
                     </h3>
                     
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteAgenda(id);
-                      }}
-                      className="absolute right-3 top-3.5 text-slate-300 hover:text-red-500 transition-colors p-1 rounded-md opacity-0 group-hover:opacity-100 focus:opacity-100"
-                      title="Delete Agenda"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {isActive && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-md border border-indigo-100">
+                          <CheckCircle size={10} /> Active
+                        </span>
+                      )}
+                      
+                      {deletingId === id ? (
+                        <div className="flex items-center gap-1 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded-lg text-rose-600 animate-in fade-in duration-150">
+                          <span className="text-[10px] font-bold">Delete?</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteAgenda(id);
+                              setDeletingId(null);
+                            }}
+                            className="text-white bg-rose-500 hover:bg-rose-600 transition-colors px-1.5 py-0.5 rounded text-[9px] font-extrabold cursor-pointer"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingId(null);
+                            }}
+                            className="text-slate-500 hover:text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-colors px-1 py-0.5 rounded text-[9px] font-semibold cursor-pointer"
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingId(id);
+                          }}
+                          className="text-slate-400 hover:text-red-500 hover:bg-rose-50 transition-colors p-1.5 rounded-lg cursor-pointer"
+                          title="Delete Agenda"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <p className="text-slate-500 text-xs line-clamp-2 mb-3.5">
@@ -90,12 +125,6 @@ export const AgendaHistory: React.FC<AgendaHistoryProps> = ({
                       </span>
                     </div>
                   </div>
-
-                  {isActive && (
-                    <div className="absolute top-3.5 right-3 text-indigo-600 flex items-center gap-1 text-[10px] font-bold bg-indigo-50 px-1.5 py-0.5 rounded-md self-start border border-indigo-100">
-                      <CheckCircle size={10} /> Active
-                    </div>
-                  )}
                 </div>
               );
             })}

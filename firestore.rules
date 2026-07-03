@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global safety net: Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core security helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Structured shape check for SavedAgendaItem
+    function isValidSavedAgendaItem(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId.size() <= 128
+        && data.templateId is string && data.templateId.size() <= 128
+        && data.agenda is map
+        && (!('files' in data) || data.files is list)
+        && (!('completedItemIds' in data) || data.completedItemIds is list);
+    }
+
+    // Rules for the agendas collection
+    match /agendas/{agendaId} {
+      // Secure read operations
+      allow get: if isSignedIn() && (resource == null || isOwner(existing().userId));
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Secure create logic
+      allow create: if isSignedIn()
+        && isValidId(agendaId)
+        && isOwner(incoming().userId)
+        && isValidSavedAgendaItem(incoming())
+        && incoming().createdAt == request.time;
+        
+      // Secure update logic with immutability constraints
+      allow update: if isSignedIn()
+        && isOwner(existing().userId)
+        && isOwner(incoming().userId)
+        && isValidSavedAgendaItem(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['agenda', 'files', 'completedItemIds', 'updatedAt']);
+        
+      // Secure delete logic
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+    }
+  }
+}

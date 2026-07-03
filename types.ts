@@ -30,6 +30,18 @@ export interface UploadedFile {
   size: number;
 }
 
+export interface SavedAgendaItem {
+  id: string;
+  userId: string;
+  agenda: MeetingAgenda;
+  timestamp: Date;
+  createdAt?: any;
+  updatedAt?: any;
+  templateId: string;
+  files: UploadedFile[];
+  completedItemIds?: string[];
+}
+
 export enum Sender {
   USER = 'user',
   MODEL = 'model'
